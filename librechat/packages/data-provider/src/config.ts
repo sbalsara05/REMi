@@ -976,6 +976,7 @@ export const interfaceSchema = z
     remi: z
       .object({
         mouseHistory: z.boolean().optional(),
+        companion: z.boolean().optional(),
       })
       .optional(),
   })

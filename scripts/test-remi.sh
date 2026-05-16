@@ -8,6 +8,9 @@ echo "==> REMi API tests (store, service, routes)"
 (cd api && npx jest --ci \
   server/services/remi/handoffStore.spec.js \
   server/services/remi/handoffService.spec.js \
+  server/services/remi/inferenceService.spec.js \
+  server/services/remi/queryHandler.spec.js \
+  server/services/remi/deviceAuthService.spec.js \
   server/routes/__tests__/remi.spec.js)
 
 echo "==> REMi client tests"

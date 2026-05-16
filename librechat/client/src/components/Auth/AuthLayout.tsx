@@ -1,7 +1,7 @@
 import { ThemeSelector } from '@librechat/client';
 import { TStartupConfig } from 'librechat-data-provider';
 import { ErrorMessage } from '~/components/Auth/ErrorMessage';
-import { AsciiMouse } from '~/components/Icons';
+import RemiPlayfulMouse from '~/components/Remi/RemiPlayfulMouse';
 import RemiAmbient from '~/components/Glass/RemiAmbient';
 import { TranslationKeys, useLocalize } from '~/hooks';
 import SocialLoginRender from './SocialLoginRender';
@@ -67,11 +67,10 @@ function AuthLayout({
       <Banner />
       <BlinkAnimation active={isFetching}>
         <div className="relative z-[1] mt-8 flex flex-col items-center gap-2">
-          <AsciiMouse
-            variant="logoCompact"
-            size="md"
-            className="text-brand-purple"
+          <RemiPlayfulMouse
+            profile="hero"
             title={localize('com_ui_logo', { 0: appTitle })}
+            className="scale-75 sm:scale-90"
           />
           <span className="text-sm font-semibold tracking-[0.2em] text-text-primary">{appTitle}</span>
         </div>

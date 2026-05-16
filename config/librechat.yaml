@@ -9,6 +9,7 @@ interface:
   customWelcome: 'Welcome to REMi. Pick an OpenRouter model and start chatting.'
   remi:
     mouseHistory: true
+    companion: true
     branding: full
   modelSelect: true
   parameters: true

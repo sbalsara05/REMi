@@ -1,0 +1,17 @@
+.remi-sprite {
+  display: inline-block;
+  flex-shrink: 0;
+  overflow: hidden;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  vertical-align: middle;
+}
+
+.remi-sprite--bleed {
+  overflow: visible;
+}
+
+.remi-sprite--paused {
+  animation: none !important;
+}

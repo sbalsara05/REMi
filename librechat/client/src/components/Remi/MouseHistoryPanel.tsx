@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import type { TRemiInteraction } from 'librechat-data-provider';
 import { Button, Skeleton, Spinner } from '@librechat/client';
 import { WarningCircle } from '@phosphor-icons/react';
-import { AsciiMouse } from '~/components/Icons';
+import { RemiMouse } from '~/components/Icons';
 import {
   glassCardHover,
   glassCardVariants,
@@ -61,7 +61,7 @@ function RemiInteractionCard({
     >
       <div className="mb-2 flex items-center justify-between gap-2 text-xs text-text-secondary">
         <div className="flex items-center gap-1.5">
-          <AsciiMouse variant="micro" size="sm" className="shrink-0 text-brand-purple" />
+          <RemiMouse clip="walkSide" size="sm" className="shrink-0" />
           <span>{formatRelativeTime(item.createdAt)}</span>
         </div>
         <span
@@ -113,7 +113,7 @@ function MouseHistoryChrome({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex flex-col">
       <div className="mb-3 flex items-center gap-2 px-3 pt-2">
-        <AsciiMouse variant="peek" size="sm" className="text-brand-purple" />
+        <RemiMouse clip="attackSide" size="md" />
         <div className="mouse-stripe-divider min-w-0 flex-1 shrink-0" aria-hidden />
       </div>
       {children}

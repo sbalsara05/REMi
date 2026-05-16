@@ -51,6 +51,12 @@ echo "Building $APP_NAME..."
 build
 echo "Launching $APP_NAME..."
 run_app
+if ! command -v fswatch >/dev/null 2>&1; then
+  echo "fswatch not found — install with: brew install fswatch"
+  echo "$APP_NAME is running (no auto-rebuild). Logs: /tmp/magicpointer-runtime.log"
+  wait
+fi
+
 echo "Watching UI/MagicPointer.swift and UI/main.swift"
 
 fswatch -o "UI/MagicPointer.swift" "UI/main.swift" | while read -r _; do

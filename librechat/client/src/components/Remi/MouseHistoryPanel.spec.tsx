@@ -180,7 +180,7 @@ describe('MouseHistoryPanel', () => {
     });
   });
 
-  it('renders the REMi ASCII mouse on interaction cards', () => {
+  it('renders the REMi sprite mouse on interaction cards', () => {
     useRemiInteractionsInfiniteQuery.mockReturnValue({
       data: {
         pages: [
@@ -210,7 +210,7 @@ describe('MouseHistoryPanel', () => {
     });
 
     renderPanel();
-    expect(screen.getAllByTestId('remi-ascii-mouse').length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId('remi-sprite-mouse').length).toBeGreaterThan(0);
   });
 
   it('applies preview streaming class when responseSoFar grows', async () => {

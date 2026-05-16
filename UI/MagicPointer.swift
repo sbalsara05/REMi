@@ -16,13 +16,14 @@ import Cocoa
 import CoreGraphics
 import ApplicationServices
 import ScreenCaptureKit
+import Security
 
 // ─────────────────────────────────────────────
 // MARK: — Config
 // ─────────────────────────────────────────────
 
 enum Config {
-    static let tarsBaseURL                = "http://localhost:8080"
+    static let remiBaseURL                = "http://localhost:3080/api/remi"
     static let wiggleThreshold: Int       = 3
     static let wiggleWindowSeconds        = 1.2
     static let wiggleMinDistance: CGFloat = 28
@@ -433,13 +434,279 @@ final class ContextCapturer {
 }
 
 // ─────────────────────────────────────────────
-// MARK: — TARS Client
+// MARK: — REMi Auth (Keychain + device login)
 // ─────────────────────────────────────────────
 
-final class TARSClient {
+enum RemiAuth {
+    private static let accessKey = "remi.accessToken"
+    private static let refreshKey = "remi.refreshToken"
+
+    static var accessToken: String? {
+        KeychainHelper.read(key: accessKey)
+    }
+
+    static func saveSession(access: String, refresh: String) {
+        KeychainHelper.write(key: accessKey, value: access)
+        KeychainHelper.write(key: refreshKey, value: refresh)
+    }
+
+    static func clearSession() {
+        KeychainHelper.delete(key: accessKey)
+        KeychainHelper.delete(key: refreshKey)
+    }
+
+    static func ensureLoggedIn(completion: @escaping (Error?) -> Void) {
+        if accessToken != nil {
+            completion(nil)
+            return
+        }
+        promptLogin(completion: completion)
+    }
+
+    static func promptLogin(completion: @escaping (Error?) -> Void) {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Sign in to REMi"
+            alert.informativeText = "Use your LibreChat account credentials."
+            alert.addButton(withTitle: "Sign In")
+            alert.addButton(withTitle: "Cancel")
+
+            let fields = makeCredentialFields()
+            alert.accessoryView = fields.container
+            alert.window.initialFirstResponder = fields.email
+
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                completion(URLError(.cancelled))
+                return
+            }
+
+            let email = fields.email.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let password = fields.password.stringValue
+            guard !email.isEmpty, !password.isEmpty else {
+                completion(NSError(domain: "RemiAuth", code: 400, userInfo: [
+                    NSLocalizedDescriptionKey: "Enter your email and password.",
+                ]))
+                return
+            }
+
+            login(email: email, password: password, completion: completion)
+        }
+    }
+
+    private static func makeCredentialFields() -> (container: NSView, email: NSTextField, password: NSSecureTextField) {
+        let width: CGFloat = 280
+        let height: CGFloat = 56
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+
+        let email = NSTextField(frame: NSRect(x: 0, y: 28, width: width, height: 24))
+        email.placeholderString = "Email"
+        email.isEditable = true
+        email.isSelectable = true
+        email.isBezeled = true
+        email.bezelStyle = .roundedBezel
+
+        let password = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: width, height: 24))
+        password.placeholderString = "Password"
+        password.isEditable = true
+        password.isSelectable = true
+        password.isBezeled = true
+        password.bezelStyle = .roundedBezel
+
+        container.addSubview(email)
+        container.addSubview(password)
+        return (container, email, password)
+    }
+
+    static func login(email: String, password: String, completion: @escaping (Error?) -> Void) {
+        guard !email.isEmpty, !password.isEmpty else {
+            completion(NSError(domain: "RemiAuth", code: 400, userInfo: [
+                NSLocalizedDescriptionKey: "Enter your email and password.",
+            ]))
+            return
+        }
+        guard let url = URL(string: "\(Config.remiBaseURL)/device/login") else {
+            completion(URLError(.badURL)); return
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONEncoder().encode(["email": email, "password": password])
+
+        URLSession.shared.dataTask(with: req) { data, response, error in
+            if let error {
+                DispatchQueue.main.async { completion(error) }
+                return
+            }
+            let http = response as? HTTPURLResponse
+            let status = http?.statusCode ?? 0
+
+            if let data,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               (200...299).contains(status) {
+                if json["twoFAPending"] as? Bool == true,
+                   let tempToken = json["tempToken"] as? String {
+                    DispatchQueue.main.async {
+                        promptTwoFactor(tempToken: tempToken, completion: completion)
+                    }
+                    return
+                }
+                if let token = json["token"] as? String,
+                   let refresh = json["refreshToken"] as? String {
+                    saveSession(access: token, refresh: refresh)
+                    DispatchQueue.main.async { completion(nil) }
+                    return
+                }
+            }
+
+            let message = loginErrorMessage(data: data, status: status)
+            DispatchQueue.main.async {
+                completion(NSError(domain: "RemiAuth", code: status, userInfo: [
+                    NSLocalizedDescriptionKey: message,
+                ]))
+            }
+        }.resume()
+    }
+
+    static func promptTwoFactor(tempToken: String, completion: @escaping (Error?) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "Two-factor authentication"
+        alert.informativeText = "Enter the 6-digit code from your authenticator app."
+        alert.addButton(withTitle: "Verify")
+        alert.addButton(withTitle: "Cancel")
+
+        let codeField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+        codeField.placeholderString = "123456"
+        codeField.isEditable = true
+        codeField.isBezeled = true
+        codeField.bezelStyle = .roundedBezel
+        alert.accessoryView = codeField
+        alert.window.initialFirstResponder = codeField
+
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            completion(URLError(.cancelled))
+            return
+        }
+
+        let code = codeField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !code.isEmpty else {
+            completion(NSError(domain: "RemiAuth", code: 400, userInfo: [
+                NSLocalizedDescriptionKey: "Enter your authenticator code.",
+            ]))
+            return
+        }
+
+        verifyTwoFactor(tempToken: tempToken, code: code, completion: completion)
+    }
+
+    static func verifyTwoFactor(tempToken: String, code: String, completion: @escaping (Error?) -> Void) {
+        guard let url = URL(string: "\(Config.remiBaseURL)/device/login/2fa") else {
+            completion(URLError(.badURL)); return
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONEncoder().encode(["tempToken": tempToken, "token": code])
+
+        URLSession.shared.dataTask(with: req) { data, response, error in
+            if let error {
+                DispatchQueue.main.async { completion(error) }
+                return
+            }
+            let http = response as? HTTPURLResponse
+            let status = http?.statusCode ?? 0
+
+            if let data,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               (200...299).contains(status),
+               let token = json["token"] as? String,
+               let refresh = json["refreshToken"] as? String {
+                saveSession(access: token, refresh: refresh)
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+
+            let message = loginErrorMessage(data: data, status: status)
+            DispatchQueue.main.async {
+                completion(NSError(domain: "RemiAuth", code: status, userInfo: [
+                    NSLocalizedDescriptionKey: message,
+                ]))
+            }
+        }.resume()
+    }
+
+    private static func loginErrorMessage(data: Data?, status: Int) -> String {
+        if let data,
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let message = json["message"] as? String, !message.isEmpty {
+                if message == "Missing credentials" {
+                    return "Enter your email and password."
+                }
+                return message
+            }
+            if let error = json["error"] as? String, !error.isEmpty { return error }
+        }
+        switch status {
+        case 403:
+            return "Two-factor authentication is enabled. Turn off 2FA in LibreChat settings or complete login in the web app first."
+        case 400:
+            return "Enter your email and password."
+        case 404, 401, 422:
+            return "Invalid email or password."
+        case 0:
+            return "Cannot reach REMi at \(Config.remiBaseURL). Is the API running on port 3080?"
+        default:
+            return "Login failed (HTTP \(status))."
+        }
+    }
+}
+
+enum KeychainHelper {
+    static func write(key: String, value: String) {
+        let data = Data(value.utf8)
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key,
+            kSecAttrService as String: "com.remi.magicpointer",
+        ]
+        SecItemDelete(query as CFDictionary)
+        var add = query
+        add[kSecValueData as String] = data
+        SecItemAdd(add as CFDictionary, nil)
+    }
+
+    static func read(key: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key,
+            kSecAttrService as String: "com.remi.magicpointer",
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data,
+              let value = String(data: data, encoding: .utf8) else { return nil }
+        return value
+    }
+
+    static func delete(key: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key,
+            kSecAttrService as String: "com.remi.magicpointer",
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}
+
+// ─────────────────────────────────────────────
+// MARK: — REMi Client
+// ─────────────────────────────────────────────
+
+final class RemiClient {
 
     struct Payload: Encodable {
-        let llm, query, captureMode: String
+        let interactionId, llm, query, captureMode: String
         let cursorX, cursorY: Double
         let selectionRect: SelectionRect?
         let hoveredText, appName, screenshotBase64: String?
@@ -451,8 +718,26 @@ final class TARSClient {
         onToken: @escaping (String) -> Void,
         onComplete: @escaping (Error?) -> Void
     ) {
-        guard let url = URL(string: "\(Config.tarsBaseURL)/query") else {
-            onComplete(URLError(.badURL)); return
+        RemiAuth.ensureLoggedIn { [weak self] authError in
+            if let authError {
+                DispatchQueue.main.async { onComplete(authError) }
+                return
+            }
+            self?.performQuery(
+                query: query, llm: llm, context: context,
+                onToken: onToken, onComplete: onComplete
+            )
+        }
+    }
+
+    private func performQuery(
+        query: String, llm: LLM, context: CursorContext,
+        onToken: @escaping (String) -> Void,
+        onComplete: @escaping (Error?) -> Void
+    ) {
+        guard let url = URL(string: "\(Config.remiBaseURL)/query"),
+              let token = RemiAuth.accessToken else {
+            onComplete(URLError(.userAuthenticationRequired)); return
         }
 
         var selRect: Payload.SelectionRect?
@@ -461,6 +746,7 @@ final class TARSClient {
         }
 
         let body = Payload(
+            interactionId: UUID().uuidString,
             llm: llm.rawValue,
             query: query,
             captureMode: selRect != nil ? "selection" : "cursor",
@@ -476,18 +762,36 @@ final class TARSClient {
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.httpBody = try? JSONEncoder().encode(body)
 
-        URLSession.shared.dataTask(with: req) { data, _, error in
+        URLSession.shared.dataTask(with: req) { data, response, error in
             if let e = error { DispatchQueue.main.async { onComplete(e) }; return }
+            if let http = response as? HTTPURLResponse, http.statusCode == 401 {
+                RemiAuth.clearSession()
+                DispatchQueue.main.async {
+                    onComplete(NSError(domain: "RemiClient", code: 401, userInfo: [
+                        NSLocalizedDescriptionKey: "Session expired — sign in again",
+                    ]))
+                }
+                return
+            }
             guard let data, let text = String(data: data, encoding: .utf8) else {
                 DispatchQueue.main.async { onComplete(URLError(.cannotDecodeContentData)) }; return
             }
+            var streamError: Error?
             for line in text.components(separatedBy: "\n") where line.hasPrefix("data: ") {
                 let tok = String(line.dropFirst(6))
-                if tok != "[DONE]" { DispatchQueue.main.async { onToken(tok) } }
+                if tok == "[DONE]" { continue }
+                if tok.hasPrefix("[ERROR]") {
+                    streamError = NSError(domain: "RemiClient", code: 502, userInfo: [
+                        NSLocalizedDescriptionKey: String(tok.dropFirst(8)),
+                    ])
+                    continue
+                }
+                DispatchQueue.main.async { onToken(tok) }
             }
-            DispatchQueue.main.async { onComplete(nil) }
+            DispatchQueue.main.async { onComplete(streamError) }
         }.resume()
     }
 }
@@ -1131,9 +1435,9 @@ final class OverlayWindowController: NSWindowController {
         )
     }
 
-    func submit(query: String, context: CursorContext, tars: TARSClient) {
+    func submit(query: String, context: CursorContext, remi: RemiClient) {
         vc.showLoading()
-        tars.send(
+        remi.send(
             query: query, llm: vc.currentLLM, context: context,
             onToken:    { [weak self] t   in self?.vc.appendToken(t) },
             onComplete: { [weak self] err in self?.vc.finishResponse(error: err) }
@@ -1148,7 +1452,7 @@ final class OverlayWindowController: NSWindowController {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let wiggle    = WiggleDetector()
     private let capturer  = ContextCapturer()
-    private let tars      = TARSClient()
+    private let remi      = RemiClient()
     private let overlay   = OverlayWindowController()
     private let selWindow = SelectionOverlayWindow()
 
@@ -1286,7 +1590,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.vc.onSubmit = { [weak self] query in
             guard let self, let ctx = self.lastCtx else { return }
             let enrichedQuery = self.overlay.queryWithCapturedContext(query)
-            self.overlay.submit(query: enrichedQuery, context: ctx, tars: self.tars)
+            self.overlay.submit(query: enrichedQuery, context: ctx, remi: self.remi)
         }
     }
 

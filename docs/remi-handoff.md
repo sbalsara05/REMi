@@ -26,20 +26,69 @@ CREATE TABLE interactions (
 
 Mouse branch **writes** rows (and PNG files). LibreChat **reads** and updates `synced_to_chat` / `conversation_id` on handoff.
 
-## HTTP API (JWT required)
+## HTTP API
 
 Base: `/api/remi`
 
+### Device auth (no JWT required)
+
 | Method | Path | Body | Response |
 |--------|------|------|----------|
+| `POST` | `/device/login` | `{ email, password }` | `{ token, refreshToken, expiresAt, user }` |
+| `POST` | `/device/refresh` | `{ refreshToken }` | `{ token, refreshToken, expiresAt, user }` |
+
+MagicPointer stores `token` / `refreshToken` in Keychain. Accounts with 2FA enabled receive `403` on device login.
+
+### Authenticated routes (JWT required)
+
+| Method | Path | Body | Response |
+|--------|------|------|----------|
+| `POST` | `/query` | See below | `text/event-stream` (SSE) |
 | `POST` | `/context` | `{ interactionId?, prompt?, response_so_far?, screenshot?, model?, crop_hash? }` | Interaction object |
 | `GET` | `/interactions?cursor=&limit=` | — | `{ interactions, nextCursor }` |
 | `GET` | `/interactions/:id` | — | Interaction object |
 | `GET` | `/interactions/:id/screenshot` | — | PNG bytes |
 | `POST` | `/handoff` | `{ interactionId }` | `{ conversationId, alreadySynced? }` |
 
-- `screenshot` in `/context`: base64 or `data:image/png;base64,...` (max ~3MB JSON body).
-- Auth: `Authorization: Bearer <jwt>` from LibreChat login.
+Auth: `Authorization: Bearer <jwt>` from LibreChat login or device login.
+
+### `POST /query` (MagicPointer inference)
+
+**Body:**
+
+```json
+{
+  "interactionId": "uuid (required, [A-Za-z0-9_-]{1,128})",
+  "query": "user question",
+  "llm": "claude | chatgpt | gemini",
+  "captureMode": "cursor | selection",
+  "cursorX": 0,
+  "cursorY": 0,
+  "selectionRect": { "x", "y", "width", "height" },
+  "hoveredText": "optional",
+  "appName": "optional",
+  "screenshotBase64": "optional"
+}
+```
+
+**SSE response** (MagicPointer-compatible):
+
+- Token: `data: <plaintext>\n\n`
+- Done: `data: [DONE]\n\n`
+- Error (after stream started): `data: [ERROR] <message>\n\n`
+
+Server upserts SQLite: `prompt`, `screenshot`, `model` at start; debounced `response_so_far` during stream.
+
+**Model map:**
+
+| `llm` | OpenRouter model |
+|-------|------------------|
+| `claude` | `anthropic/claude-sonnet-4` |
+| `chatgpt` | `openai/gpt-4o-mini` |
+| `gemini` | `google/gemini-2.5-flash-preview` |
+
+- `screenshot` in `/context` or `/query`: base64 or `data:image/png;base64,...` (max ~3MB JSON body).
+- `interactionId` must not contain path segments (`..`, `/`); invalid ids return `400`/`500` on write.
 
 ## Docker dev
 

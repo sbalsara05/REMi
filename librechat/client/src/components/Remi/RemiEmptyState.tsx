@@ -1,4 +1,4 @@
-import { AsciiMouse } from '~/components/Icons';
+import RemiPlayfulMouse from '~/components/Remi/RemiPlayfulMouse';
 import { useLocalize } from '~/hooks';
 
 export default function RemiEmptyState() {
@@ -6,8 +6,8 @@ export default function RemiEmptyState() {
 
   return (
     <div className="glass-card remi-radius-card flex flex-col items-center justify-center p-6 text-center">
-      <div className="remi-mouse-icon-breathe mb-3 flex size-11 items-center justify-center rounded-full bg-surface-tertiary/80">
-        <AsciiMouse variant="logoHero" size="hero" className="text-brand-purple" />
+      <div className="remi-mouse-icon-breathe mb-4 flex min-h-[100px] min-w-[100px] items-center justify-center rounded-full bg-surface-tertiary/80 p-2">
+        <RemiPlayfulMouse profile="companion" className="scale-110" />
       </div>
       <p className="text-sm font-medium text-text-primary">
         {localize('com_remi_empty_title')}

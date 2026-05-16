@@ -1,0 +1,96 @@
+.remi-companion {
+  position: absolute;
+  z-index: 40;
+  pointer-events: none;
+  transition:
+    left 0.9s cubic-bezier(0.34, 1.2, 0.64, 1),
+    right 0.9s cubic-bezier(0.34, 1.2, 0.64, 1),
+    top 0.9s cubic-bezier(0.34, 1.2, 0.64, 1),
+    bottom 0.9s cubic-bezier(0.34, 1.2, 0.64, 1);
+}
+
+.remi-companion--br {
+  right: 1.25rem;
+  bottom: 5rem;
+  left: auto;
+  top: auto;
+}
+
+.remi-companion--bl {
+  left: 1.25rem;
+  bottom: 5rem;
+  right: auto;
+  top: auto;
+}
+
+.remi-companion--tl {
+  left: 1.25rem;
+  top: 4rem;
+  right: auto;
+  bottom: auto;
+}
+
+.remi-companion--tr {
+  right: 1.25rem;
+  top: 4rem;
+  left: auto;
+  bottom: auto;
+}
+
+.remi-companion__btn {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 0.5rem;
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.remi-companion__btn:hover {
+  transform: scale(1.12);
+}
+
+.remi-companion__btn:focus-visible {
+  outline: 2px solid rgb(var(--brand-purple) / 0.85);
+  outline-offset: 3px;
+}
+
+.remi-companion__sprite--flip {
+  transform: scaleX(-1);
+}
+
+.remi-companion--pop .remi-companion__btn {
+  animation: remi-companion-pop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes remi-companion-pop {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.22);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@media (max-width: 767px) {
+  .remi-companion {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .remi-companion {
+    transition: none;
+  }
+
+  .remi-companion--pop .remi-companion__btn {
+    animation: none;
+  }
+}

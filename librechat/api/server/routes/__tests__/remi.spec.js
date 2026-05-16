@@ -26,11 +26,24 @@ jest.mock('~/server/services/remi/handoffService', () => ({
   handoffInteraction: jest.fn(),
 }));
 
+jest.mock('~/server/services/remi/inferenceService', () => ({
+  streamOpenRouterCompletion: jest.fn(),
+}));
+
+jest.mock('../remi/device', () => {
+  const express = require('express');
+  const router = express.Router();
+  router.post('/login', (_req, res) => res.status(200).json({ token: 'device-token' }));
+  router.post('/refresh', (_req, res) => res.status(200).json({ token: 'device-token' }));
+  return router;
+});
+
 describe('REMi routes', () => {
   let app;
   let tempDir;
   let handoffStore;
   let handoffInteraction;
+  let streamOpenRouterCompletion;
 
   beforeAll(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'remi-route-test-'));
@@ -39,6 +52,7 @@ describe('REMi routes', () => {
 
     handoffStore = require('~/server/services/remi/handoffStore');
     ({ handoffInteraction } = require('~/server/services/remi/handoffService'));
+    ({ streamOpenRouterCompletion } = require('~/server/services/remi/inferenceService'));
     const remiRouter = require('../remi');
 
     app = express();
@@ -59,6 +73,7 @@ describe('REMi routes', () => {
       next();
     });
     handoffInteraction.mockReset();
+    streamOpenRouterCompletion.mockReset();
 
     handoffStore.closeDb();
     const dbPath = handoffStore.getDbPath();
@@ -80,6 +95,51 @@ describe('REMi routes', () => {
       const response = await request(app).get('/api/remi/interactions');
       expect(response.status).toBe(401);
       expect(response.body).toEqual({ message: 'Unauthorized' });
+    });
+  });
+
+  describe('POST /query', () => {
+    async function* mockTokenStream() {
+      yield 'Hello';
+      yield ' world';
+    }
+
+    it('returns 400 when interactionId is missing', async () => {
+      const response = await request(app)
+        .post('/api/remi/query')
+        .set('Authorization', 'Bearer test-token')
+        .send({ query: 'Hi', llm: 'claude' });
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('interactionId');
+    });
+
+    it('streams tokens and persists response_so_far', async () => {
+      streamOpenRouterCompletion.mockImplementation(() => mockTokenStream());
+
+      const response = await request(app)
+        .post('/api/remi/query')
+        .set('Authorization', 'Bearer test-token')
+        .send({
+          interactionId: 'query-1',
+          query: 'What is on screen?',
+          llm: 'claude',
+          captureMode: 'cursor',
+          cursorX: 1,
+          cursorY: 2,
+        });
+
+      expect(response.status).toBe(200);
+      expect(response.headers['content-type']).toContain('text/event-stream');
+      expect(response.text).toContain('data: Hello');
+      expect(response.text).toContain('data: [DONE]');
+
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      const row = handoffStore.getInteraction('query-1');
+      expect(row.prompt).toBe('What is on screen?');
+      expect(row.responseSoFar).toBe('Hello world');
+      expect(row.model).toBe('anthropic/claude-sonnet-4');
     });
   });
 

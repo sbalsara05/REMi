@@ -4,8 +4,12 @@ const { logger } = require('@librechat/data-schemas');
 const requireJwtAuth = require('~/server/middleware/requireJwtAuth');
 const handoffStore = require('~/server/services/remi/handoffStore');
 const { handoffInteraction } = require('~/server/services/remi/handoffService');
+const { handleRemiQuery } = require('~/server/services/remi/queryHandler');
+const deviceRouter = require('./device');
 
 const router = express.Router();
+
+router.use('/device', deviceRouter);
 router.use(requireJwtAuth);
 
 router.get('/interactions', (req, res) => {
@@ -45,6 +49,8 @@ router.get('/interactions/:id', (req, res) => {
     res.status(500).json({ error: 'Failed to get interaction' });
   }
 });
+
+router.post('/query', handleRemiQuery);
 
 router.post('/context', (req, res) => {
   try {

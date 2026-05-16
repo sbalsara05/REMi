@@ -130,6 +130,7 @@ html {
   --switch-unchecked: 0 0% 58%;
   --remi-mouse-pearl: #f5f0eb;
   --remi-mouse-nose: #e8b4b4;
+  /* Inline stream carets stay ASCII (::after content cannot use sprite sheets). */
   --remi-stream-caret: '(_)_">';
   --remi-stream-preview-caret: '()>';
   --remi-thinking-caret: '(o.o)';
@@ -3315,6 +3316,10 @@ html {
   }
 
   .remi-mouse-icon-breathe {
+    animation: none;
+  }
+
+  .remi-sprite {
     animation: none;
   }
 

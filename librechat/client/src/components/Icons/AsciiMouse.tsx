@@ -1,14 +1,11 @@
-import { cn } from '~/utils';
-import {
-  getAsciiMouseLines,
-  type AsciiMouseVariant,
-} from './asciiMouseCatalog';
+import RemiMouse from './RemiMouse';
+import type { AsciiMouseVariant } from './asciiMouseCatalog';
 
 const sizeClass = {
-  micro: 'text-[8px] leading-none',
-  sm: 'text-[9px] leading-none',
-  md: 'text-[10px] leading-tight',
-  hero: 'text-[11px] leading-tight',
+  micro: 'sm',
+  sm: 'sm',
+  md: 'md',
+  hero: 'hero',
 } as const;
 
 type AsciiMouseProps = {
@@ -19,31 +16,21 @@ type AsciiMouseProps = {
   'data-testid'?: string;
 };
 
-/** Renders catalog ASCII mouse art in monospace. */
+/** @deprecated Renders pixel sprite via RemiMouse (ASCII art removed). */
 export default function AsciiMouse({
   variant = 'micro',
   size = 'sm',
   className,
   title,
-  'data-testid': dataTestId = 'remi-ascii-mouse',
+  'data-testid': dataTestId = 'remi-sprite-mouse',
 }: AsciiMouseProps) {
-  const lines = getAsciiMouseLines(variant);
-
   return (
-    <pre
-      className={cn(
-        'remi-ascii m-0 inline-flex flex-col items-center justify-center font-mono whitespace-pre',
-        sizeClass[size],
-        className,
-      )}
+    <RemiMouse
+      variant={variant}
+      size={size}
+      className={className}
+      title={title}
       data-testid={dataTestId}
-      aria-hidden={title ? undefined : true}
-      role={title ? 'img' : undefined}
-    >
-      {title ? <span className="sr-only">{title}</span> : null}
-      {lines.map((line, i) => (
-        <span key={`${variant}-${i}`}>{line}</span>
-      ))}
-    </pre>
+    />
   );
 }

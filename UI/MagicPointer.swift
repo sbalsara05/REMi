@@ -15,6 +15,7 @@
 import Cocoa
 import CoreGraphics
 import ApplicationServices
+import ScreenCaptureKit
 
 // ─────────────────────────────────────────────
 // MARK: — Config
@@ -138,29 +139,42 @@ final class WiggleDetector {
 
 final class ContextCapturer {
 
-    func capture(at point: CGPoint) -> CursorContext {
-        CursorContext(
-            source: .cursor(position: point),
-            hoveredText: readAXText(at: point),
-            appName: NSWorkspace.shared.frontmostApplication?.localizedName,
-            screenshotData: captureRegion(CGRect(x: point.x - 100, y: point.y - 100, width: 200, height: 200))
-        )
+    func capture(at point: CGPoint, completion: @escaping (CursorContext) -> Void) {
+        let hoveredText = readAXText(at: point)
+        let appName = NSWorkspace.shared.frontmostApplication?.localizedName
+        let rect = CGRect(x: point.x - 100, y: point.y - 100, width: 200, height: 200)
+        captureRegion(rect) { data in
+            completion(
+                CursorContext(
+                    source: .cursor(position: point),
+                    hoveredText: hoveredText,
+                    appName: appName,
+                    screenshotData: data
+                )
+            )
+        }
     }
 
-    func capture(region rect: CGRect) -> CursorContext {
-        CursorContext(
-            source: .selection(rect: rect),
-            hoveredText: readAXText(at: CGPoint(x: rect.midX, y: rect.midY)),
-            appName: NSWorkspace.shared.frontmostApplication?.localizedName,
-            screenshotData: captureRegion(rect)
-        )
+    func capture(region rect: CGRect, completion: @escaping (CursorContext) -> Void) {
+        let hoveredText = readAXText(at: CGPoint(x: rect.midX, y: rect.midY))
+        let appName = NSWorkspace.shared.frontmostApplication?.localizedName
+        captureRegion(rect) { data in
+            completion(
+                CursorContext(
+                    source: .selection(rect: rect),
+                    hoveredText: hoveredText,
+                    appName: appName,
+                    screenshotData: data
+                )
+            )
+        }
     }
 
     private func readAXText(at point: CGPoint) -> String? {
         let sys = AXUIElementCreateSystemWide()
-        var el: CFTypeRef?
-        guard AXUIElementCopyElementAtPosition(sys, Float(point.x), Float(point.y), &el) == .success,
-              let axEl = el as! AXUIElement? else { return nil }
+        var hitElement: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(sys, Float(point.x), Float(point.y), &hitElement) == .success,
+              let axEl = hitElement else { return nil }
         for attr in [kAXValueAttribute, kAXSelectedTextAttribute, kAXTitleAttribute] {
             var val: CFTypeRef?
             AXUIElementCopyAttributeValue(axEl, attr as CFString, &val)
@@ -169,11 +183,42 @@ final class ContextCapturer {
         return nil
     }
 
-    func captureRegion(_ rect: CGRect) -> Data? {
-        guard let img = CGWindowListCreateImage(
-            rect, .optionOnScreenOnly, kCGNullWindowID, .bestResolution
-        ) else { return nil }
-        return NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:])
+    func captureRegion(_ rect: CGRect, completion: @escaping (Data?) -> Void) {
+        if #unavailable(macOS 14.0) {
+            completion(nil)
+            return
+        }
+
+        Task {
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                guard let display = content.displays.first(where: { $0.frame.contains(CGPoint(x: rect.midX, y: rect.midY)) })
+                        ?? content.displays.first else {
+                    await MainActor.run { completion(nil) }
+                    return
+                }
+
+                let displayRelativeRect = CGRect(
+                    x: rect.origin.x - display.frame.origin.x,
+                    y: rect.origin.y - display.frame.origin.y,
+                    width: rect.width,
+                    height: rect.height
+                ).integral
+
+                let config = SCStreamConfiguration()
+                config.sourceRect = displayRelativeRect
+                config.width = Int(displayRelativeRect.width)
+                config.height = Int(displayRelativeRect.height)
+                config.showsCursor = false
+
+                let filter = SCContentFilter(display: display, excludingWindows: [])
+                let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+                await MainActor.run { completion(data) }
+            } catch {
+                await MainActor.run { completion(nil) }
+            }
+        }
     }
 }
 
@@ -548,7 +593,8 @@ final class OverlayViewController: NSViewController {
         case .cursor:
             modeLabel.stringValue = "cursor context"
             if let t = context.hoveredText, !t.isEmpty {
-                textField.placeholderString = "About: "\(String(t.prefix(50)))\(t.count > 50 ? "…" : "")""
+                let summary = "\(String(t.prefix(50)))\(t.count > 50 ? "…" : "")"
+                textField.placeholderString = "About: \(summary)"
             } else {
                 textField.placeholderString = context.appName.map { "Ask about \($0)…" }
                     ?? "Ask about what's under your cursor…"
@@ -556,7 +602,8 @@ final class OverlayViewController: NSViewController {
         case .selection(let rect):
             modeLabel.stringValue = "selected region  \(Int(rect.width)) × \(Int(rect.height)) px"
             if let t = context.hoveredText, !t.isEmpty {
-                textField.placeholderString = "About selection: "\(String(t.prefix(50)))\(t.count > 50 ? "…" : "")""
+                let summary = "\(String(t.prefix(50)))\(t.count > 50 ? "…" : "")"
+                textField.placeholderString = "About selection: \(summary)"
             } else {
                 textField.placeholderString = "Ask about the selected region…"
             }
@@ -640,7 +687,6 @@ final class OverlayWindowController: NSWindowController {
 // MARK: — App Delegate
 // ─────────────────────────────────────────────
 
-@main
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let wiggle    = WiggleDetector()
     private let capturer  = ContextCapturer()
@@ -690,9 +736,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wiggle.onWiggle = { [weak self] pt in
             guard let self else { return }
             DispatchQueue.main.async {
-                let ctx = self.capturer.capture(at: pt)
-                self.lastCtx = ctx
-                self.overlay.show(at: pt, context: ctx, llm: self.activeLLM)
+                self.capturer.capture(at: pt) { ctx in
+                    self.lastCtx = ctx
+                    self.overlay.show(at: pt, context: ctx, llm: self.activeLLM)
+                }
             }
         }
     }
@@ -701,10 +748,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         selWindow.onSelection = { [weak self] rect in
             guard let self else { return }
             DispatchQueue.main.async {
-                let ctx = self.capturer.capture(region: rect)
-                self.lastCtx = ctx
-                let anchor = CGPoint(x: rect.midX, y: rect.maxY + 20)
-                self.overlay.show(at: anchor, context: ctx, llm: self.activeLLM)
+                self.capturer.capture(region: rect) { ctx in
+                    self.lastCtx = ctx
+                    let anchor = CGPoint(x: rect.midX, y: rect.maxY + 20)
+                    self.overlay.show(at: anchor, context: ctx, llm: self.activeLLM)
+                }
             }
         }
     }

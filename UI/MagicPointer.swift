@@ -24,10 +24,12 @@ import ScreenCaptureKit
 enum Config {
     static let tarsBaseURL                = "http://localhost:8080"
     static let wiggleThreshold: Int       = 3
-    static let wiggleWindowSeconds        = 0.5
-    static let wiggleMinDistance: CGFloat = 10
-    static let overlayWidth: CGFloat      = 480
-    static let overlayHeight: CGFloat     = 130
+    static let wiggleWindowSeconds        = 1.2
+    static let wiggleMinDistance: CGFloat = 18
+    static let wiggleCooldownSeconds      = 1.0
+    static let overlayWidth: CGFloat      = 540
+    static let overlayHeight: CGFloat     = 124
+    static let cursorCaptureSize: CGFloat = 360
     static let selectModeKeyCode: UInt16  = 49   // Space
     static let selectModeModifiers: NSEvent.ModifierFlags = [.command, .shift]
 }
@@ -63,6 +65,27 @@ enum LLM: String, CaseIterable {
         NSColor(red: 0.99, green: 0.73, blue: 0.01, alpha: 1),
         NSColor(red: 0.20, green: 0.66, blue: 0.33, alpha: 1),
     ]
+
+    var shimmerColors: [NSColor] {
+        switch self {
+        case .gemini:
+            return Self.geminiColors
+        case .claude:
+            return [
+                NSColor(red: 0.98, green: 0.62, blue: 0.34, alpha: 1),
+                NSColor(red: 0.91, green: 0.34, blue: 0.16, alpha: 1),
+                NSColor(red: 0.82, green: 0.22, blue: 0.10, alpha: 1),
+                NSColor(red: 0.98, green: 0.62, blue: 0.34, alpha: 1),
+            ]
+        case .chatgpt:
+            return [
+                NSColor(red: 0.28, green: 0.84, blue: 0.70, alpha: 1),
+                NSColor(red: 0.06, green: 0.64, blue: 0.50, alpha: 1),
+                NSColor(red: 0.02, green: 0.44, blue: 0.34, alpha: 1),
+                NSColor(red: 0.28, green: 0.84, blue: 0.70, alpha: 1),
+            ]
+        }
+    }
 
     var icon: String {
         switch self {
@@ -102,34 +125,60 @@ struct CursorContext {
 
 final class WiggleDetector {
     var onWiggle: ((CGPoint) -> Void)?
-    private var positions: [(point: CGPoint, time: Date)] = []
-    private var lastDirection = 0
-    private var reversalCount = 0
+    private var lastPoint: CGPoint?
+    private var lastDirection = 0 // -1: left, +1: right
+    private var runDistance: CGFloat = 0
+    private var swingCount = 0
     private var windowStart   = Date()
+    private var lastTriggerAt = Date.distantPast
 
     func process(point: CGPoint) {
         let now = Date()
-        positions = positions.filter { now.timeIntervalSince($0.time) < Config.wiggleWindowSeconds }
-        positions.append((point, now))
-        guard positions.count >= 2 else { return }
+        if now.timeIntervalSince(lastTriggerAt) < Config.wiggleCooldownSeconds {
+            lastPoint = point
+            return
+        }
+        if now.timeIntervalSince(windowStart) > Config.wiggleWindowSeconds {
+            resetWindow(now: now)
+        }
 
-        let dx  = point.x - positions[positions.count - 2].point.x
+        guard let prev = lastPoint else {
+            lastPoint = point
+            return
+        }
+
+        let dx = point.x - prev.x
         guard abs(dx) > 1 else { return }
         let dir = dx > 0 ? 1 : -1
 
         if lastDirection != 0 && dir != lastDirection {
-            let seg = positions[max(0, positions.count - 4)].point
-            if abs(point.x - seg.x) >= Config.wiggleMinDistance { reversalCount += 1 }
+            if runDistance >= Config.wiggleMinDistance {
+                swingCount += 1
+                if swingCount >= Config.wiggleThreshold {
+                    lastTriggerAt = now
+                    resetAll(now: now)
+                    onWiggle?(point)
+                    return
+                }
+            }
+            runDistance = abs(dx)
+        } else {
+            runDistance += abs(dx)
         }
         lastDirection = dir
+        lastPoint = point
+    }
 
-        if now.timeIntervalSince(windowStart) > Config.wiggleWindowSeconds {
-            reversalCount = 0; windowStart = now
-        }
-        if reversalCount >= Config.wiggleThreshold {
-            reversalCount = 0; positions.removeAll(); lastDirection = 0
-            onWiggle?(point)
-        }
+    private func resetWindow(now: Date) {
+        windowStart = now
+        swingCount = 0
+        runDistance = 0
+        lastDirection = 0
+    }
+
+    private func resetAll(now: Date) {
+        resetWindow(now: now)
+        lastPoint = nil
     }
 }
 
@@ -140,9 +189,15 @@ final class WiggleDetector {
 final class ContextCapturer {
 
     func capture(at point: CGPoint, completion: @escaping (CursorContext) -> Void) {
-        let hoveredText = readAXText(at: point)
+        let hoveredText = mergedHoverContext(at: point)
         let appName = NSWorkspace.shared.frontmostApplication?.localizedName
-        let rect = CGRect(x: point.x - 100, y: point.y - 100, width: 200, height: 200)
+        let size = Config.cursorCaptureSize
+        let rect = CGRect(
+            x: point.x - size / 2,
+            y: point.y - size / 2,
+            width: size,
+            height: size
+        )
         captureRegion(rect) { data in
             completion(
                 CursorContext(
@@ -156,7 +211,7 @@ final class ContextCapturer {
     }
 
     func capture(region rect: CGRect, completion: @escaping (CursorContext) -> Void) {
-        let hoveredText = readAXText(at: CGPoint(x: rect.midX, y: rect.midY))
+        let hoveredText = mergedHoverContext(at: CGPoint(x: rect.midX, y: rect.midY))
         let appName = NSWorkspace.shared.frontmostApplication?.localizedName
         captureRegion(rect) { data in
             completion(
@@ -170,6 +225,30 @@ final class ContextCapturer {
         }
     }
 
+    private func mergedHoverContext(at point: CGPoint) -> String? {
+        let axText = readAXText(at: point)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let browserSummary = readBrowserPageSummary()?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let browserDOM = readBrowserDeepContext()?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        var browserContext: String?
+        if let summary = browserSummary, !summary.isEmpty,
+           let dom = browserDOM, !dom.isEmpty {
+            browserContext = "Page: \(summary)\nDOM snippet: \(dom)"
+        } else if let summary = browserSummary, !summary.isEmpty {
+            browserContext = "Page: \(summary)"
+        } else if let dom = browserDOM, !dom.isEmpty {
+            browserContext = "DOM snippet: \(dom)"
+        }
+
+        let hasAX = !(axText ?? "").isEmpty
+        let hasBrowser = !(browserContext ?? "").isEmpty
+        if hasAX && hasBrowser {
+            if axText == browserContext { return clipped(axText) }
+            return clipped("\(axText!)\n\nWeb context: \(browserContext!)")
+        }
+        return clipped(hasAX ? axText : browserContext)
+    }
+
     private func readAXText(at point: CGPoint) -> String? {
         let sys = AXUIElementCreateSystemWide()
         var hitElement: AXUIElement?
@@ -181,6 +260,136 @@ final class ContextCapturer {
             if let s = val as? String, !s.isEmpty { return s }
         }
         return nil
+    }
+
+    private func readBrowserPageSummary() -> String? {
+        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else { return nil }
+
+        let script: String?
+        switch bundleID {
+        case "com.apple.Safari":
+            script = """
+            tell application "Safari"
+                if (count of windows) = 0 then return ""
+                set t to name of current tab of front window
+                set u to URL of current tab of front window
+                return t & " | " & u
+            end tell
+            """
+        case "com.google.Chrome":
+            script = """
+            tell application "Google Chrome"
+                if (count of windows) = 0 then return ""
+                set t to title of active tab of front window
+                set u to URL of active tab of front window
+                return t & " | " & u
+            end tell
+            """
+        case "com.microsoft.edgemac":
+            script = """
+            tell application "Microsoft Edge"
+                if (count of windows) = 0 then return ""
+                set t to title of active tab of front window
+                set u to URL of active tab of front window
+                return t & " | " & u
+            end tell
+            """
+        case "company.thebrowser.Browser":
+            script = """
+            tell application "Arc"
+                if (count of windows) = 0 then return ""
+                set t to title of active tab of front window
+                set u to URL of active tab of front window
+                return t & " | " & u
+            end tell
+            """
+        default:
+            script = nil
+        }
+        guard let script else { return nil }
+        return runAppleScript(script)
+    }
+
+    private func readBrowserDeepContext() -> String? {
+        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else { return nil }
+        guard let script = browserDeepScript(for: bundleID) else { return nil }
+        return runAppleScript(script)
+    }
+
+    private func browserDeepScript(for bundleID: String) -> String? {
+        let js = """
+        (function() {
+          const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+          const selected = clean((window.getSelection && window.getSelection().toString()) || '');
+          if (selected.length > 0) return selected.slice(0, 600);
+          const cand = [];
+          const push = (v) => { const c = clean(v); if (c.length > 20) cand.push(c); };
+          push(document.title || '');
+          push((document.querySelector('h1') || {}).innerText || '');
+          const nodes = document.querySelectorAll('main p, article p, p');
+          for (let i = 0; i < nodes.length && cand.join(' ').length < 900; i++) push(nodes[i].innerText);
+          if (cand.length === 0) push(document.body ? document.body.innerText : '');
+          return cand.join(' | ').slice(0, 1000);
+        })();
+        """
+        let escapedJS = js
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: " ")
+
+        switch bundleID {
+        case "com.apple.Safari":
+            return """
+            tell application "Safari"
+                if (count of windows) = 0 then return ""
+                set dom to do JavaScript "\(escapedJS)" in current tab of front window
+                return dom
+            end tell
+            """
+        case "com.google.Chrome":
+            return """
+            tell application "Google Chrome"
+                if (count of windows) = 0 then return ""
+                return execute active tab of front window javascript "\(escapedJS)"
+            end tell
+            """
+        case "com.microsoft.edgemac":
+            return """
+            tell application "Microsoft Edge"
+                if (count of windows) = 0 then return ""
+                return execute active tab of front window javascript "\(escapedJS)"
+            end tell
+            """
+        default:
+            return nil
+        }
+    }
+
+    private func runAppleScript(_ script: String) -> String? {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        proc.arguments = ["-e", script]
+        let out = Pipe()
+        proc.standardOutput = out
+        proc.standardError = Pipe()
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+            guard proc.terminationStatus == 0 else { return nil }
+            let data = out.fileHandleForReading.readDataToEndOfFile()
+            let text = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return (text?.isEmpty == false) ? text : nil
+        } catch {
+            return nil
+        }
+    }
+
+    private func clipped(_ text: String?) -> String? {
+        guard let text, !text.isEmpty else { return nil }
+        let maxChars = 1400
+        if text.count <= maxChars { return text }
+        return String(text.prefix(maxChars)) + "…"
     }
 
     func captureRegion(_ rect: CGRect, completion: @escaping (Data?) -> Void) {
@@ -288,54 +497,72 @@ final class TARSClient {
 
 final class GlowBorderView: NSView {
     var llm: LLM = .claude { didSet { rebuild() } }
+    private var haloLayer: CALayer?
     private var glowLayer: CALayer?
-    private var shimmerLayer: CALayer?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         wantsLayer = true
-        layer?.cornerRadius = 14
+        layer?.cornerRadius = bounds.height / 2
         layer?.masksToBounds = false
         rebuild()
     }
 
-    private func rebuild() {
-        glowLayer?.removeFromSuperlayer()
-        shimmerLayer?.removeFromSuperlayer()
-
-        let gl = CALayer()
-        gl.frame = bounds.insetBy(dx: -20, dy: -20)
-        gl.cornerRadius = 34
-        gl.borderWidth = 2
-        gl.borderColor = llm.glowColor.cgColor
-        gl.shadowColor = llm.glowColor.cgColor
-        gl.shadowRadius = 20; gl.shadowOpacity = 0.9; gl.shadowOffset = .zero
-        layer?.insertSublayer(gl, at: 0)
-        glowLayer = gl
-
-        let pulse = CABasicAnimation(keyPath: "shadowOpacity")
-        pulse.fromValue = 0.5; pulse.toValue = 1.0
-        pulse.duration = 0.9; pulse.autoreverses = true; pulse.repeatCount = .infinity
-        gl.add(pulse, forKey: "pulse")
-
-        if llm == .gemini { addGeminiShimmer(above: gl) }
+    override func layout() {
+        super.layout()
+        layer?.cornerRadius = bounds.height / 2
+        rebuild()
     }
 
-    private func addGeminiShimmer(above gl: CALayer) {
-        let sh = CAGradientLayer()
-        sh.frame = bounds; sh.cornerRadius = 14
-        sh.type = .conic
-        sh.startPoint = CGPoint(x: 0.5, y: 0.5)
-        sh.endPoint   = CGPoint(x: 1, y: 0)
-        sh.colors = LLM.geminiColors.map(\.cgColor) + [LLM.geminiColors[0].cgColor]
-        sh.opacity = 0.55
-        layer?.insertSublayer(sh, above: gl)
-        shimmerLayer = sh
+    private func rebuild() {
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        haloLayer?.removeFromSuperlayer()
+        glowLayer?.removeFromSuperlayer()
 
-        let rot = CABasicAnimation(keyPath: "transform.rotation")
-        rot.fromValue = 0; rot.toValue = CGFloat.pi * 2
-        rot.duration = 3; rot.repeatCount = .infinity
-        sh.add(rot, forKey: "rot")
+        let halo = CALayer()
+        halo.frame = bounds.insetBy(dx: -16, dy: -16)
+        halo.cornerRadius = halo.frame.height / 2
+        halo.borderWidth = 8
+        halo.borderColor = llm.glowColor.withAlphaComponent(0.34).cgColor
+        halo.backgroundColor = NSColor.clear.cgColor
+        halo.shadowColor = llm.glowColor.cgColor
+        halo.shadowRadius = 30
+        halo.shadowOpacity = 1.0
+        halo.shadowOffset = .zero
+        halo.shadowPath = CGPath(roundedRect: halo.bounds, cornerWidth: halo.cornerRadius, cornerHeight: halo.cornerRadius, transform: nil)
+        layer?.insertSublayer(halo, at: 0)
+        haloLayer = halo
+
+        let gl = CALayer()
+        gl.frame = bounds.insetBy(dx: -8, dy: -8)
+        gl.cornerRadius = gl.frame.height / 2
+        gl.borderWidth = 3.4
+        gl.borderColor = llm.glowColor.withAlphaComponent(0.98).cgColor
+        gl.backgroundColor = NSColor.clear.cgColor
+        gl.shadowColor = llm.glowColor.cgColor
+        gl.shadowRadius = 20
+        gl.shadowOpacity = 0.95
+        gl.shadowOffset = .zero
+        gl.shadowPath = CGPath(roundedRect: gl.bounds, cornerWidth: gl.cornerRadius, cornerHeight: gl.cornerRadius, transform: nil)
+        layer?.insertSublayer(gl, above: halo)
+        glowLayer = gl
+
+        let pulseOpacity = CABasicAnimation(keyPath: "opacity")
+        pulseOpacity.fromValue = 0.6
+        pulseOpacity.toValue = 1.0
+        pulseOpacity.duration = 0.95
+        pulseOpacity.autoreverses = true
+        pulseOpacity.repeatCount = .infinity
+        gl.add(pulseOpacity, forKey: "pulseOpacity")
+        halo.add(pulseOpacity, forKey: "haloPulseOpacity")
+
+        let pulseWidth = CABasicAnimation(keyPath: "borderWidth")
+        pulseWidth.fromValue = 2.6
+        pulseWidth.toValue = 4.6
+        pulseWidth.duration = 0.95
+        pulseWidth.autoreverses = true
+        pulseWidth.repeatCount = .infinity
+        gl.add(pulseWidth, forKey: "pulseWidth")
     }
 }
 
@@ -377,7 +604,7 @@ final class SelectionView: NSView {
         dragging = false
         guard currentRect.width > 10, currentRect.height > 10 else {
             currentRect = .zero; needsDisplay = true
-            NotificationCenter.default.post(name: .magicPointerSelectionCancelled, object: nil)
+            (window as? SelectionOverlayWindow)?.deactivate()
             return
         }
         // Flip to CG (top-left origin) coords
@@ -389,13 +616,31 @@ final class SelectionView: NSView {
             height: currentRect.height
         )
         currentRect = .zero; needsDisplay = true
+        (window as? SelectionOverlayWindow)?.deactivate()
         onSelection?(cgRect)
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard currentRect.width > 0 || dragging else { return }
-
         let color = activeLLM.glowColor
+
+        if !dragging && currentRect.equalTo(.zero) {
+            NSColor.black.withAlphaComponent(0.18).setFill()
+            bounds.fill()
+
+            let hint = "Drag to select  •  Esc to cancel"
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+                .foregroundColor: NSColor.white.withAlphaComponent(0.95),
+            ]
+            let sz = (hint as NSString).size(withAttributes: attrs)
+            let hx = bounds.midX - (sz.width + 20) / 2
+            let hy = bounds.maxY - 56
+            NSColor.black.withAlphaComponent(0.55).setFill()
+            NSBezierPath(roundedRect: NSRect(x: hx, y: hy, width: sz.width + 20, height: sz.height + 10),
+                         xRadius: 7, yRadius: 7).fill()
+            (hint as NSString).draw(at: NSPoint(x: hx + 10, y: hy + 5), withAttributes: attrs)
+            return
+        }
 
         // Scrim outside selection
         let scrim = NSBezierPath(rect: bounds)
@@ -493,6 +738,79 @@ final class SelectionOverlayWindow: NSWindow {
 }
 
 // ─────────────────────────────────────────────
+// MARK: — Cursor Glow Window
+// ─────────────────────────────────────────────
+
+final class CursorGlowWindow: NSPanel {
+    private static let size: CGFloat = 88
+    private let ringLayer = CALayer()
+
+    init() {
+        let sz = Self.size
+        super.init(
+            contentRect: NSRect(x: 0, y: 0, width: sz, height: sz),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        level = .floating
+        backgroundColor = .clear
+        isOpaque = false
+        hasShadow = false
+        ignoresMouseEvents = true
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: sz, height: sz))
+        host.wantsLayer = true
+        host.layer?.backgroundColor = NSColor.clear.cgColor
+        contentView = host
+
+        ringLayer.frame = host.bounds.insetBy(dx: 16, dy: 16)
+        ringLayer.cornerRadius = ringLayer.frame.width / 2
+        ringLayer.backgroundColor = NSColor.clear.cgColor
+        ringLayer.borderWidth = 2
+        host.layer?.addSublayer(ringLayer)
+    }
+
+    func show(llm: LLM) {
+        let sz = Self.size
+        let pt = NSEvent.mouseLocation
+        setFrameOrigin(NSPoint(x: pt.x - sz / 2, y: pt.y - sz / 2))
+
+        ringLayer.borderColor = llm.glowColor.cgColor
+        ringLayer.shadowColor = llm.glowColor.cgColor
+        ringLayer.shadowRadius = 10
+        ringLayer.shadowOffset = .zero
+        ringLayer.shadowOpacity = 0.5
+        ringLayer.removeAnimation(forKey: "pulse")
+
+        let pulse = CABasicAnimation(keyPath: "shadowOpacity")
+        pulse.fromValue = 0.5
+        pulse.toValue = 1.0
+        pulse.duration = 0.6
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        ringLayer.add(pulse, forKey: "pulse")
+
+        orderFront(nil)
+    }
+
+    func dismiss() {
+        ringLayer.removeAnimation(forKey: "pulse")
+        orderOut(nil)
+    }
+}
+
+// ─────────────────────────────────────────────
+// MARK: — Overlay Panel
+// ─────────────────────────────────────────────
+
+final class OverlayPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
+// ─────────────────────────────────────────────
 // MARK: — Overlay View Controller
 // ─────────────────────────────────────────────
 
@@ -503,6 +821,7 @@ final class OverlayViewController: NSViewController {
     private let textField     = NSTextField()
     private let responseLabel = NSTextField()
     private let modeLabel     = NSTextField()
+    private let hotkeyHint    = NSTextField()
 
     var currentLLM: LLM = .claude
     var onSubmit: ((String) -> Void)?
@@ -517,31 +836,44 @@ final class OverlayViewController: NSViewController {
     override func viewDidLoad() { super.viewDidLoad(); buildUI() }
 
     private func buildUI() {
-        let inner = NSRect(x: 8, y: 8,
-                           width: Config.overlayWidth - 16,
-                           height: Config.overlayHeight - 16)
+        let inner = NSRect(x: 6, y: 6,
+                           width: Config.overlayWidth - 12,
+                           height: Config.overlayHeight - 12)
 
-        glowView.frame = inner
+        glowView.frame = inner.insetBy(dx: -6, dy: -6)
         view.addSubview(glowView)
 
         container.frame = inner
         container.wantsLayer = true
-        container.layer?.cornerRadius = 14
+        container.layer?.cornerRadius = inner.height / 2
         container.layer?.masksToBounds = true
         container.blendingMode = .behindWindow
-        container.material = .hudWindow
+        container.material = .underWindowBackground
         container.state = .active
+        container.layer?.backgroundColor = NSColor(calibratedRed: 0.33, green: 0.56, blue: 0.92, alpha: 0.16).cgColor
+        container.layer?.borderWidth = 1
+        container.layer?.borderColor = NSColor.white.withAlphaComponent(0.30).cgColor
         view.addSubview(container)
 
-        modeLabel.frame = NSRect(x: 12, y: inner.height - 22, width: 260, height: 16)
+        modeLabel.frame = NSRect(x: 20, y: inner.height - 26, width: 300, height: 16)
         modeLabel.isEditable = false; modeLabel.isBordered = false
         modeLabel.backgroundColor = .clear
-        modeLabel.textColor = .tertiaryLabelColor
-        modeLabel.font = NSFont.systemFont(ofSize: 11)
-        modeLabel.stringValue = "cursor context"
+        modeLabel.textColor = .white.withAlphaComponent(0.88)
+        modeLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        modeLabel.stringValue = "MagicPointer  ·  cursor context"
         container.addSubview(modeLabel)
 
-        llmPicker.frame = NSRect(x: 12, y: inner.height - 44, width: Config.overlayWidth - 32, height: 22)
+        hotkeyHint.frame = NSRect(x: inner.width - 190, y: inner.height - 26, width: 170, height: 16)
+        hotkeyHint.isEditable = false
+        hotkeyHint.isBordered = false
+        hotkeyHint.backgroundColor = .clear
+        hotkeyHint.textColor = .white.withAlphaComponent(0.75)
+        hotkeyHint.font = NSFont.systemFont(ofSize: 10)
+        hotkeyHint.alignment = .right
+        hotkeyHint.stringValue = "⌘⇧Space: select"
+        container.addSubview(hotkeyHint)
+
+        llmPicker.frame = NSRect(x: 18, y: inner.height - 52, width: Config.overlayWidth - 36, height: 22)
         llmPicker.segmentCount = LLM.allCases.count
         for (i, llm) in LLM.allCases.enumerated() {
             llmPicker.setLabel("\(llm.icon) \(llm.displayName)", forSegment: i)
@@ -551,27 +883,24 @@ final class OverlayViewController: NSViewController {
         llmPicker.target = self; llmPicker.action = #selector(pickerChanged)
         container.addSubview(llmPicker)
 
-        let sep = NSBox(); sep.boxType = .separator
-        sep.frame = NSRect(x: 12, y: inner.height - 48, width: Config.overlayWidth - 32, height: 1)
-        container.addSubview(sep)
-
-        textField.frame = NSRect(x: 12, y: inner.height - 72, width: Config.overlayWidth - 32, height: 24)
+        textField.frame = NSRect(x: 18, y: inner.height - 82, width: Config.overlayWidth - 36, height: 24)
         textField.placeholderString = "Ask about what's under your cursor…"
         textField.isBordered = false; textField.backgroundColor = .clear
-        textField.textColor = .labelColor; textField.font = NSFont.systemFont(ofSize: 14)
+        textField.textColor = .white; textField.font = NSFont.systemFont(ofSize: 14, weight: .medium)
         textField.focusRingType = .none; textField.delegate = self
         container.addSubview(textField)
 
         let sep2 = NSBox(); sep2.boxType = .separator
-        sep2.frame = NSRect(x: 12, y: inner.height - 76, width: Config.overlayWidth - 32, height: 1)
+        sep2.frame = NSRect(x: 18, y: inner.height - 86, width: Config.overlayWidth - 36, height: 1)
         container.addSubview(sep2)
 
-        responseLabel.frame = NSRect(x: 12, y: 10, width: Config.overlayWidth - 32, height: 30)
+        responseLabel.frame = NSRect(x: 18, y: 10, width: Config.overlayWidth - 36, height: 22)
         responseLabel.isEditable = false; responseLabel.isBordered = false
-        responseLabel.backgroundColor = .clear; responseLabel.textColor = .secondaryLabelColor
-        responseLabel.font = NSFont.systemFont(ofSize: 12)
+        responseLabel.backgroundColor = .clear; responseLabel.textColor = .white.withAlphaComponent(0.78)
+        responseLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         responseLabel.lineBreakMode = .byWordWrapping
         responseLabel.cell?.wraps = true; responseLabel.cell?.isScrollable = false
+        responseLabel.stringValue = "Ask anything about what you are looking at"
         container.addSubview(responseLabel)
     }
 
@@ -588,26 +917,48 @@ final class OverlayViewController: NSViewController {
     func reset(context: CursorContext, llm: LLM) {
         textField.stringValue = ""; responseLabel.stringValue = ""
         updateLLM(llm)
+        let pageSummary = extractedPageSummary(from: context.hoveredText)
 
         switch context.source {
         case .cursor:
-            modeLabel.stringValue = "cursor context"
-            if let t = context.hoveredText, !t.isEmpty {
-                let summary = "\(String(t.prefix(50)))\(t.count > 50 ? "…" : "")"
+            modeLabel.stringValue = pageSummary == nil ? "MagicPointer  ·  cursor context"
+                                                       : "MagicPointer  ·  web context"
+            if let pageSummary, !pageSummary.isEmpty {
+                let summary = "\(String(pageSummary.prefix(80)))\(pageSummary.count > 80 ? "…" : "")"
+                textField.placeholderString = "About page: \(summary)"
+            } else if let t = context.hoveredText, !t.isEmpty {
+                let summary = "\(String(t.prefix(80)))\(t.count > 80 ? "…" : "")"
                 textField.placeholderString = "About: \(summary)"
             } else {
                 textField.placeholderString = context.appName.map { "Ask about \($0)…" }
                     ?? "Ask about what's under your cursor…"
             }
         case .selection(let rect):
-            modeLabel.stringValue = "selected region  \(Int(rect.width)) × \(Int(rect.height)) px"
-            if let t = context.hoveredText, !t.isEmpty {
-                let summary = "\(String(t.prefix(50)))\(t.count > 50 ? "…" : "")"
+            modeLabel.stringValue = pageSummary == nil
+                ? "selected region  \(Int(rect.width)) × \(Int(rect.height)) px"
+                : "selected region  \(Int(rect.width)) × \(Int(rect.height)) px  ·  web context"
+            if let pageSummary, !pageSummary.isEmpty {
+                let summary = "\(String(pageSummary.prefix(80)))\(pageSummary.count > 80 ? "…" : "")"
+                textField.placeholderString = "About selected page area: \(summary)"
+            } else if let t = context.hoveredText, !t.isEmpty {
+                let summary = "\(String(t.prefix(80)))\(t.count > 80 ? "…" : "")"
                 textField.placeholderString = "About selection: \(summary)"
             } else {
                 textField.placeholderString = "Ask about the selected region…"
             }
         }
+    }
+
+    private func extractedPageSummary(from hoverText: String?) -> String? {
+        guard let hoverText, !hoverText.isEmpty else { return nil }
+        for line in hoverText.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("Page: ") {
+                let val = String(trimmed.dropFirst("Page: ".count)).trimmingCharacters(in: .whitespaces)
+                return val.isEmpty ? nil : val
+            }
+        }
+        return nil
     }
 
     func focus() { view.window?.makeFirstResponder(textField) }
@@ -639,10 +990,15 @@ extension OverlayViewController: NSTextFieldDelegate {
 
 final class OverlayWindowController: NSWindowController {
     let vc = OverlayViewController()
+    private let cursorGlow = CursorGlowWindow()
+    private var outsideClickMonitor: Any?
+    private var escKeyMonitor: Any?
+    private var escGlobalMonitor: Any?
+    private var requiresEscToDismiss = false
     var onLLMChange: ((LLM) -> Void)?
 
     init() {
-        let panel = NSPanel(
+        let panel = OverlayPanel(
             contentRect: NSRect(x: 0, y: 0, width: Config.overlayWidth, height: Config.overlayHeight),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false
@@ -656,22 +1012,74 @@ final class OverlayWindowController: NSWindowController {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    func show(at screenPoint: CGPoint, context: CursorContext, llm: LLM) {
+    func show(at screenPoint: CGPoint, context: CursorContext, llm: LLM, requireEscToDismiss: Bool = false) {
         guard let screen = NSScreen.main else { return }
+        requiresEscToDismiss = requireEscToDismiss
         let origin = NSPoint(
             x: screenPoint.x - Config.overlayWidth / 2,
             y: screen.frame.height - screenPoint.y - Config.overlayHeight / 2 - 70
         )
         window?.setFrameOrigin(origin)
         vc.reset(context: context, llm: llm)
-        window?.orderFront(nil); vc.focus()
+        NSApp.activate(ignoringOtherApps: true)
+        window?.orderFront(nil)
+        window?.makeKey()
+        DispatchQueue.main.async { [weak self] in self?.vc.focus() }
+        cursorGlow.show(llm: llm)
 
-        NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            self?.dismiss()
+        if let m = outsideClickMonitor {
+            NSEvent.removeMonitor(m)
+            outsideClickMonitor = nil
+        }
+        if let m = escKeyMonitor {
+            NSEvent.removeMonitor(m)
+            escKeyMonitor = nil
+        }
+        if let m = escGlobalMonitor {
+            NSEvent.removeMonitor(m)
+            escGlobalMonitor = nil
+        }
+
+        if requiresEscToDismiss {
+            escKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
+                guard let self else { return e }
+                if self.requiresEscToDismiss && e.keyCode == 53 {
+                    self.dismiss()
+                    return nil
+                }
+                return e
+            }
+            escGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] e in
+                guard let self else { return }
+                if self.requiresEscToDismiss && e.keyCode == 53 {
+                    DispatchQueue.main.async { self.dismiss() }
+                }
+            }
+        } else {
+            outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] e in
+                guard let self, let w = self.window else { return }
+                if !w.frame.contains(e.locationInWindow) { self.dismiss() }
+            }
         }
     }
 
-    func dismiss() { window?.orderOut(nil) }
+    func dismiss() {
+        if let m = outsideClickMonitor {
+            NSEvent.removeMonitor(m)
+            outsideClickMonitor = nil
+        }
+        if let m = escKeyMonitor {
+            NSEvent.removeMonitor(m)
+            escKeyMonitor = nil
+        }
+        if let m = escGlobalMonitor {
+            NSEvent.removeMonitor(m)
+            escGlobalMonitor = nil
+        }
+        requiresEscToDismiss = false
+        cursorGlow.dismiss()
+        window?.orderOut(nil)
+    }
 
     func submit(query: String, context: CursorContext, tars: TARSClient) {
         vc.showLoading()
@@ -697,15 +1105,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var eventTap:  CFMachPort?
     private var lastCtx:   CursorContext?
     private var activeLLM: LLM = .claude
+    private var wiggleRequestID = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let logURL = URL(fileURLWithPath: "/tmp/magicpointer.log")
+        func log(_ msg: String) {
+            let line = "\(Date()): \(msg)\n"
+            if let data = line.data(using: .utf8) {
+                if FileManager.default.fileExists(atPath: logURL.path) {
+                    let handle = try? FileHandle(forWritingTo: logURL)
+                    handle?.seekToEndOfFile()
+                    handle?.write(data)
+                    handle?.closeFile()
+                } else {
+                    try? data.write(to: logURL)
+                }
+            }
+        }
+
         NSApp.setActivationPolicy(.accessory)
+        log("startup begin")
+
+        let trusted = AXIsProcessTrusted()
+        log("AX trusted = \(trusted)")
         requestAX()
+
         setupEventTap()
+        log("event tap = \(eventTap != nil ? "OK" : "FAILED")")
+
         wireWiggle()
+        log("wiggle wired")
         wireSelection()
+        log("selection wired")
         wireOverlay()
+        log("overlay wired")
         registerHotkey()
+        log("hotkey registered")
+        log("startup complete")
     }
 
     private func requestAX() {
@@ -730,15 +1166,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CGEvent.tapEnable(tap: tap, enable: true)
     }
 
-    private func handleMouse(_ event: CGEvent) { wiggle.process(point: event.location) }
+    private func handleMouse(_ event: CGEvent) {
+        guard !selWindow.isVisible else { return }
+        let point = event.location
+        wiggle.process(point: point)
+    }
 
     private func wireWiggle() {
         wiggle.onWiggle = { [weak self] pt in
             guard let self else { return }
             DispatchQueue.main.async {
+                self.wiggleRequestID += 1
+                let requestID = self.wiggleRequestID
+                guard !self.selWindow.isVisible else { return }
+
+                let provisional = CursorContext(
+                    source: .cursor(position: pt),
+                    hoveredText: nil,
+                    appName: NSWorkspace.shared.frontmostApplication?.localizedName,
+                    screenshotData: nil
+                )
+                self.lastCtx = provisional
+                self.overlay.show(at: pt, context: provisional, llm: self.activeLLM)
                 self.capturer.capture(at: pt) { ctx in
+                    guard self.wiggleRequestID == requestID else { return }
                     self.lastCtx = ctx
-                    self.overlay.show(at: pt, context: ctx, llm: self.activeLLM)
                 }
             }
         }
@@ -748,10 +1200,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         selWindow.onSelection = { [weak self] rect in
             guard let self else { return }
             DispatchQueue.main.async {
+                let anchor = CGPoint(x: rect.midX, y: rect.maxY + 20)
+                let provisional = CursorContext(
+                    source: .selection(rect: rect),
+                    hoveredText: nil,
+                    appName: NSWorkspace.shared.frontmostApplication?.localizedName,
+                    screenshotData: nil
+                )
+                self.lastCtx = provisional
+                self.overlay.show(at: anchor, context: provisional, llm: self.activeLLM)
                 self.capturer.capture(region: rect) { ctx in
                     self.lastCtx = ctx
-                    let anchor = CGPoint(x: rect.midX, y: rect.maxY + 20)
-                    self.overlay.show(at: anchor, context: ctx, llm: self.activeLLM)
                 }
             }
         }
@@ -771,10 +1230,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func registerHotkey() {
         NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return }
-            if event.keyCode == Config.selectModeKeyCode &&
-               event.modifierFlags.intersection([.command, .shift, .control, .option])
-                   == Config.selectModeModifiers {
-                DispatchQueue.main.async { self.selWindow.activate(llm: self.activeLLM) }
+            let mods = event.modifierFlags.intersection([.command, .shift, .control, .option])
+            guard event.keyCode == Config.selectModeKeyCode else { return }
+            guard mods.contains(.command), mods.contains(.shift), !mods.contains(.control), !mods.contains(.option) else { return }
+            DispatchQueue.main.async {
+                if self.selWindow.isVisible {
+                    self.selWindow.deactivate(); return
+                }
+                self.wiggleRequestID += 1
+                if self.overlay.window?.isVisible == true {
+                    self.overlay.dismiss()
+                }
+                self.selWindow.activate(llm: self.activeLLM)
             }
         }
     }

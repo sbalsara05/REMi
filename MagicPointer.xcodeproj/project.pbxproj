@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		AA000000000000000000000B /* MagicPointer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000007 /* MagicPointer.swift */; };
 		AA000000000000000000000C /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000008 /* main.swift */; };
-		AA000000000000000000000D /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000009 /* Info.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -116,7 +115,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AA000000000000000000000D /* Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

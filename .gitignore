@@ -1,0 +1,9 @@
+/librechat/.git
+env.local
+librechat/.env
+librechat/librechat.yaml
+librechat/data-node/
+librechat/meili_data*/
+librechat/uploads/
+librechat/logs/
+.env.local

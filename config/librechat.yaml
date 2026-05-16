@@ -1,0 +1,41 @@
+# REMi — OpenRouter-only LibreChat config (Mac / Docker)
+# https://www.librechat.ai/docs/configuration/librechat_yaml
+
+version: 1.3.11
+
+cache: true
+
+interface:
+  customWelcome: 'Welcome to REMi. Pick an OpenRouter model and start chatting.'
+  modelSelect: true
+  parameters: true
+  presets: true
+  prompts:
+    use: true
+    create: true
+  bookmarks: true
+  multiConvo: true
+  agents:
+    use: true
+    create: true
+
+registration:
+  socialLogins: []
+
+endpoints:
+  custom:
+    - name: 'OpenRouter'
+      apiKey: '${OPENROUTER_KEY}'
+      baseURL: 'https://openrouter.ai/api/v1'
+      headers:
+        x-librechat-body-parentmessageid: '{{LIBRECHAT_BODY_PARENTMESSAGEID}}'
+      models:
+        default:
+          - 'openai/gpt-4o-mini'
+          - 'anthropic/claude-sonnet-4'
+          - 'google/gemini-2.5-flash-preview'
+        fetch: true
+      titleConvo: true
+      titleModel: 'openai/gpt-4o-mini'
+      dropParams: ['stop']
+      modelDisplayLabel: 'OpenRouter'

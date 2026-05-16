@@ -29,6 +29,7 @@ enum Config {
     static let wiggleCooldownSeconds      = 1.0
     static let overlayWidth: CGFloat      = 540
     static let overlayHeight: CGFloat     = 124
+    static let overlayCornerRadius: CGFloat = 18
     static let cursorCaptureSize: CGFloat = 360
     static let selectModeKeyCode: UInt16  = 49   // Space
     static let selectModeModifiers: NSEvent.ModifierFlags = [.command, .shift]
@@ -497,68 +498,56 @@ final class TARSClient {
 
 final class GlowBorderView: NSView {
     var llm: LLM = .claude { didSet { rebuild() } }
-    private var haloLayer: CALayer?
     private var glowLayer: CALayer?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         wantsLayer = true
-        layer?.cornerRadius = bounds.height / 2
+        layer?.cornerRadius = 14
         layer?.masksToBounds = false
         rebuild()
     }
 
     override func layout() {
         super.layout()
-        layer?.cornerRadius = bounds.height / 2
+        layer?.cornerRadius = 14
         rebuild()
     }
 
     private func rebuild() {
         guard bounds.width > 0, bounds.height > 0 else { return }
-        haloLayer?.removeFromSuperlayer()
         glowLayer?.removeFromSuperlayer()
 
-        let halo = CALayer()
-        halo.frame = bounds.insetBy(dx: -16, dy: -16)
-        halo.cornerRadius = halo.frame.height / 2
-        halo.borderWidth = 8
-        halo.borderColor = llm.glowColor.withAlphaComponent(0.34).cgColor
-        halo.backgroundColor = NSColor.clear.cgColor
-        halo.shadowColor = llm.glowColor.cgColor
-        halo.shadowRadius = 30
-        halo.shadowOpacity = 1.0
-        halo.shadowOffset = .zero
-        halo.shadowPath = CGPath(roundedRect: halo.bounds, cornerWidth: halo.cornerRadius, cornerHeight: halo.cornerRadius, transform: nil)
-        layer?.insertSublayer(halo, at: 0)
-        haloLayer = halo
-
         let gl = CALayer()
-        gl.frame = bounds.insetBy(dx: -8, dy: -8)
-        gl.cornerRadius = gl.frame.height / 2
-        gl.borderWidth = 3.4
-        gl.borderColor = llm.glowColor.withAlphaComponent(0.98).cgColor
+        gl.frame = bounds
+        gl.cornerRadius = 14
         gl.backgroundColor = NSColor.clear.cgColor
+        gl.borderWidth = 3.8
+        gl.borderColor = llm.glowColor.withAlphaComponent(1.0).cgColor
         gl.shadowColor = llm.glowColor.cgColor
-        gl.shadowRadius = 20
+        gl.shadowRadius = 26
         gl.shadowOpacity = 0.95
         gl.shadowOffset = .zero
-        gl.shadowPath = CGPath(roundedRect: gl.bounds, cornerWidth: gl.cornerRadius, cornerHeight: gl.cornerRadius, transform: nil)
-        layer?.insertSublayer(gl, above: halo)
+        gl.shadowPath = CGPath(
+            roundedRect: gl.bounds,
+            cornerWidth: gl.cornerRadius,
+            cornerHeight: gl.cornerRadius,
+            transform: nil
+        )
+        layer?.insertSublayer(gl, at: 0)
         glowLayer = gl
 
-        let pulseOpacity = CABasicAnimation(keyPath: "opacity")
-        pulseOpacity.fromValue = 0.6
+        let pulseOpacity = CABasicAnimation(keyPath: "shadowOpacity")
+        pulseOpacity.fromValue = 0.7
         pulseOpacity.toValue = 1.0
         pulseOpacity.duration = 0.95
         pulseOpacity.autoreverses = true
         pulseOpacity.repeatCount = .infinity
         gl.add(pulseOpacity, forKey: "pulseOpacity")
-        halo.add(pulseOpacity, forKey: "haloPulseOpacity")
 
         let pulseWidth = CABasicAnimation(keyPath: "borderWidth")
-        pulseWidth.fromValue = 2.6
-        pulseWidth.toValue = 4.6
+        pulseWidth.fromValue = 3.4
+        pulseWidth.toValue = 5.8
         pulseWidth.duration = 0.95
         pulseWidth.autoreverses = true
         pulseWidth.repeatCount = .infinity
@@ -645,7 +634,8 @@ final class SelectionView: NSView {
         // Scrim outside selection
         let scrim = NSBezierPath(rect: bounds)
         let hole  = NSBezierPath(rect: currentRect)
-        scrim.append(hole.reversed)
+        scrim.append(hole)
+        scrim.windingRule = .evenOdd
         NSColor.black.withAlphaComponent(0.35).setFill()
         scrim.fill()
 
@@ -737,71 +727,6 @@ final class SelectionOverlayWindow: NSWindow {
     }
 }
 
-// ─────────────────────────────────────────────
-// MARK: — Cursor Glow Window
-// ─────────────────────────────────────────────
-
-final class CursorGlowWindow: NSPanel {
-    private static let size: CGFloat = 88
-    private let ringLayer = CALayer()
-
-    init() {
-        let sz = Self.size
-        super.init(
-            contentRect: NSRect(x: 0, y: 0, width: sz, height: sz),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        level = .floating
-        backgroundColor = .clear
-        isOpaque = false
-        hasShadow = false
-        ignoresMouseEvents = true
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-
-        let host = NSView(frame: NSRect(x: 0, y: 0, width: sz, height: sz))
-        host.wantsLayer = true
-        host.layer?.backgroundColor = NSColor.clear.cgColor
-        contentView = host
-
-        ringLayer.frame = host.bounds.insetBy(dx: 16, dy: 16)
-        ringLayer.cornerRadius = ringLayer.frame.width / 2
-        ringLayer.backgroundColor = NSColor.clear.cgColor
-        ringLayer.borderWidth = 2
-        host.layer?.addSublayer(ringLayer)
-    }
-
-    func show(llm: LLM) {
-        let sz = Self.size
-        let pt = NSEvent.mouseLocation
-        setFrameOrigin(NSPoint(x: pt.x - sz / 2, y: pt.y - sz / 2))
-
-        ringLayer.borderColor = llm.glowColor.cgColor
-        ringLayer.shadowColor = llm.glowColor.cgColor
-        ringLayer.shadowRadius = 10
-        ringLayer.shadowOffset = .zero
-        ringLayer.shadowOpacity = 0.5
-        ringLayer.removeAnimation(forKey: "pulse")
-
-        let pulse = CABasicAnimation(keyPath: "shadowOpacity")
-        pulse.fromValue = 0.5
-        pulse.toValue = 1.0
-        pulse.duration = 0.6
-        pulse.autoreverses = true
-        pulse.repeatCount = .infinity
-        ringLayer.add(pulse, forKey: "pulse")
-
-        orderFront(nil)
-    }
-
-    func dismiss() {
-        ringLayer.removeAnimation(forKey: "pulse")
-        orderOut(nil)
-    }
-}
-
-// ─────────────────────────────────────────────
 // MARK: — Overlay Panel
 // ─────────────────────────────────────────────
 
@@ -810,13 +735,17 @@ final class OverlayPanel: NSPanel {
     override var canBecomeMain: Bool { true }
 }
 
+final class DraggableVisualEffectView: NSVisualEffectView {
+    override var mouseDownCanMoveWindow: Bool { true }
+}
+
 // ─────────────────────────────────────────────
 // MARK: — Overlay View Controller
 // ─────────────────────────────────────────────
 
 final class OverlayViewController: NSViewController {
     private let glowView      = GlowBorderView()
-    private let container     = NSVisualEffectView()
+    private let container     = DraggableVisualEffectView()
     private let llmPicker     = NSSegmentedControl()
     private let textField     = NSTextField()
     private let responseLabel = NSTextField()
@@ -840,12 +769,15 @@ final class OverlayViewController: NSViewController {
                            width: Config.overlayWidth - 12,
                            height: Config.overlayHeight - 12)
 
-        glowView.frame = inner.insetBy(dx: -6, dy: -6)
+        glowView.frame = inner.insetBy(dx: -2, dy: -2)
+        glowView.wantsLayer = true
+        glowView.layer?.cornerRadius = 14
+        glowView.layer?.masksToBounds = false
         view.addSubview(glowView)
 
         container.frame = inner
         container.wantsLayer = true
-        container.layer?.cornerRadius = inner.height / 2
+        container.layer?.cornerRadius = 14
         container.layer?.masksToBounds = true
         container.blendingMode = .behindWindow
         container.material = .underWindowBackground
@@ -963,6 +895,18 @@ final class OverlayViewController: NSViewController {
 
     func focus() { view.window?.makeFirstResponder(textField) }
 
+    func updatePersistentCaptureStatus(contextCount: Int, latest: String?) {
+        hotkeyHint.stringValue = "Esc: close  ·  Context \(contextCount)"
+        if let latest, !latest.isEmpty {
+            let text = String(latest.prefix(72))
+            responseLabel.stringValue = "Captured #\(contextCount): \(text)\(latest.count > 72 ? "…" : "")"
+            responseLabel.textColor = .white.withAlphaComponent(0.86)
+        } else {
+            responseLabel.stringValue = "Shift+Click to add context, or press ⌘C to add copied text."
+            responseLabel.textColor = .white.withAlphaComponent(0.78)
+        }
+    }
+
     func showLoading()              { responseLabel.stringValue = "…"; responseLabel.textColor = .tertiaryLabelColor }
     func appendToken(_ t: String)   { responseLabel.stringValue += t; responseLabel.textColor = .labelColor }
     func finishResponse(error: Error?) {
@@ -990,11 +934,14 @@ extension OverlayViewController: NSTextFieldDelegate {
 
 final class OverlayWindowController: NSWindowController {
     let vc = OverlayViewController()
-    private let cursorGlow = CursorGlowWindow()
-    private var outsideClickMonitor: Any?
+    private var contextPickMonitor: Any?
     private var escKeyMonitor: Any?
     private var escGlobalMonitor: Any?
-    private var requiresEscToDismiss = false
+    private var copyKeyLocalMonitor: Any?
+    private var copyKeyGlobalMonitor: Any?
+    private var lastClipboardString: String?
+    private var capturedContextSnippets: [String] = []
+    var onContextPick: ((CGPoint) -> Void)?
     var onLLMChange: ((LLM) -> Void)?
 
     init() {
@@ -1004,7 +951,13 @@ final class OverlayWindowController: NSWindowController {
             backing: .buffered, defer: false
         )
         panel.level = .floating
+        panel.isMovable = true
+        panel.isMovableByWindowBackground = true
         panel.backgroundColor = .clear; panel.isOpaque = false; panel.hasShadow = false
+        panel.contentView?.wantsLayer = true
+        panel.contentView?.layer?.cornerRadius = 14
+        panel.contentView?.layer?.masksToBounds = false
+        panel.invalidateShadow()
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         super.init(window: panel)
         panel.contentViewController = vc
@@ -1014,22 +967,21 @@ final class OverlayWindowController: NSWindowController {
 
     func show(at screenPoint: CGPoint, context: CursorContext, llm: LLM, requireEscToDismiss: Bool = false) {
         guard let screen = NSScreen.main else { return }
-        requiresEscToDismiss = requireEscToDismiss
         let origin = NSPoint(
             x: screenPoint.x - Config.overlayWidth / 2,
             y: screen.frame.height - screenPoint.y - Config.overlayHeight / 2 - 70
         )
         window?.setFrameOrigin(origin)
         vc.reset(context: context, llm: llm)
+        resetCapturedContext(with: context)
         NSApp.activate(ignoringOtherApps: true)
         window?.orderFront(nil)
         window?.makeKey()
         DispatchQueue.main.async { [weak self] in self?.vc.focus() }
-        cursorGlow.show(llm: llm)
 
-        if let m = outsideClickMonitor {
+        if let m = contextPickMonitor {
             NSEvent.removeMonitor(m)
-            outsideClickMonitor = nil
+            contextPickMonitor = nil
         }
         if let m = escKeyMonitor {
             NSEvent.removeMonitor(m)
@@ -1039,34 +991,64 @@ final class OverlayWindowController: NSWindowController {
             NSEvent.removeMonitor(m)
             escGlobalMonitor = nil
         }
+        if let m = copyKeyLocalMonitor {
+            NSEvent.removeMonitor(m)
+            copyKeyLocalMonitor = nil
+        }
+        if let m = copyKeyGlobalMonitor {
+            NSEvent.removeMonitor(m)
+            copyKeyGlobalMonitor = nil
+        }
+        lastClipboardString = NSPasteboard.general.string(forType: .string)
 
-        if requiresEscToDismiss {
-            escKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
-                guard let self else { return e }
-                if self.requiresEscToDismiss && e.keyCode == 53 {
-                    self.dismiss()
-                    return nil
+        escKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
+            guard let self else { return e }
+            if e.keyCode == 53 {
+                self.dismiss()
+                return nil
+            }
+            return e
+        }
+        escGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] e in
+            guard let self else { return }
+            if e.keyCode == 53 {
+                DispatchQueue.main.async { self.dismiss() }
+            }
+        }
+        copyKeyLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
+            guard let self else { return e }
+            let mods = e.modifierFlags.intersection([.command, .shift, .control, .option])
+            if e.keyCode == 8 && mods.contains(.command) && !mods.contains(.shift) && !mods.contains(.control) && !mods.contains(.option) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+                    self?.captureClipboardContextIfNeeded()
                 }
-                return e
             }
-            escGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] e in
-                guard let self else { return }
-                if self.requiresEscToDismiss && e.keyCode == 53 {
-                    DispatchQueue.main.async { self.dismiss() }
+            return e
+        }
+        copyKeyGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] e in
+            guard let self else { return }
+            let mods = e.modifierFlags.intersection([.command, .shift, .control, .option])
+            if e.keyCode == 8 && mods.contains(.command) && !mods.contains(.shift) && !mods.contains(.control) && !mods.contains(.option) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+                    self?.captureClipboardContextIfNeeded()
                 }
             }
-        } else {
-            outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] e in
-                guard let self, let w = self.window else { return }
-                if !w.frame.contains(e.locationInWindow) { self.dismiss() }
-            }
+        }
+
+        contextPickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] e in
+            guard let self, let w = self.window else { return }
+            let mods = e.modifierFlags.intersection([.command, .shift, .control, .option])
+            guard mods.contains(.shift) else { return }
+            let pt = NSEvent.mouseLocation
+            if w.frame.contains(pt) { return }
+            self.onContextPick?(pt)
         }
     }
 
     func dismiss() {
-        if let m = outsideClickMonitor {
+        if let m = contextPickMonitor {
             NSEvent.removeMonitor(m)
-            outsideClickMonitor = nil
+            contextPickMonitor = nil
         }
         if let m = escKeyMonitor {
             NSEvent.removeMonitor(m)
@@ -1076,9 +1058,77 @@ final class OverlayWindowController: NSWindowController {
             NSEvent.removeMonitor(m)
             escGlobalMonitor = nil
         }
-        requiresEscToDismiss = false
-        cursorGlow.dismiss()
+        if let m = copyKeyLocalMonitor {
+            NSEvent.removeMonitor(m)
+            copyKeyLocalMonitor = nil
+        }
+        if let m = copyKeyGlobalMonitor {
+            NSEvent.removeMonitor(m)
+            copyKeyGlobalMonitor = nil
+        }
+        lastClipboardString = nil
+        capturedContextSnippets.removeAll()
         window?.orderOut(nil)
+    }
+
+    func addCapturedContext(_ context: CursorContext) {
+        guard let snippet = contextSnippet(from: context) else { return }
+        appendCapturedSnippet(snippet)
+    }
+
+    func queryWithCapturedContext(_ query: String) -> String {
+        guard !capturedContextSnippets.isEmpty else { return query }
+        let list = capturedContextSnippets.enumerated().map { idx, item in
+            "\(idx + 1). \(item)"
+        }.joined(separator: "\n")
+        return """
+        \(query)
+
+        Additional pointer contexts collected across windows:
+        \(list)
+        """
+    }
+
+    private func resetCapturedContext(with context: CursorContext) {
+        capturedContextSnippets.removeAll()
+        if let snippet = contextSnippet(from: context) {
+            capturedContextSnippets = [snippet]
+        }
+        vc.updatePersistentCaptureStatus(
+            contextCount: max(capturedContextSnippets.count, 1),
+            latest: capturedContextSnippets.last
+        )
+    }
+
+    private func contextSnippet(from context: CursorContext) -> String? {
+        if let hover = context.hoveredText?.trimmingCharacters(in: .whitespacesAndNewlines), !hover.isEmpty {
+            return String(hover.replacingOccurrences(of: "\n", with: " ").prefix(180))
+        }
+        if let app = context.appName, !app.isEmpty {
+            return "App: \(app)"
+        }
+        return nil
+    }
+
+    private func captureClipboardContextIfNeeded() {
+        guard window?.isVisible == true else { return }
+        guard let raw = NSPasteboard.general.string(forType: .string)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else { return }
+        guard raw != lastClipboardString else { return }
+        lastClipboardString = raw
+        appendCapturedSnippet("Copied: \(String(raw.prefix(220)))")
+    }
+
+    private func appendCapturedSnippet(_ snippet: String) {
+        guard !snippet.isEmpty else { return }
+        if capturedContextSnippets.last != snippet {
+            capturedContextSnippets.append(snippet)
+        }
+        vc.updatePersistentCaptureStatus(
+            contextCount: max(capturedContextSnippets.count, 1),
+            latest: snippet
+        )
     }
 
     func submit(query: String, context: CursorContext, tars: TARSClient) {
@@ -1168,6 +1218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleMouse(_ event: CGEvent) {
         guard !selWindow.isVisible else { return }
+        guard overlay.window?.isVisible != true else { return }
         let point = event.location
         wiggle.process(point: point)
     }
@@ -1188,9 +1239,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
                 self.lastCtx = provisional
                 self.overlay.show(at: pt, context: provisional, llm: self.activeLLM)
+                self.overlay.addCapturedContext(provisional)
                 self.capturer.capture(at: pt) { ctx in
                     guard self.wiggleRequestID == requestID else { return }
                     self.lastCtx = ctx
+                    self.overlay.addCapturedContext(ctx)
                 }
             }
         }
@@ -1209,8 +1262,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
                 self.lastCtx = provisional
                 self.overlay.show(at: anchor, context: provisional, llm: self.activeLLM)
+                self.overlay.addCapturedContext(provisional)
                 self.capturer.capture(region: rect) { ctx in
                     self.lastCtx = ctx
+                    self.overlay.addCapturedContext(ctx)
                 }
             }
         }
@@ -1221,9 +1276,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.activeLLM = llm
             self?.selWindow.activeLLM = llm
         }
+        overlay.onContextPick = { [weak self] point in
+            guard let self else { return }
+            self.capturer.capture(at: point) { ctx in
+                self.lastCtx = ctx
+                self.overlay.addCapturedContext(ctx)
+            }
+        }
         overlay.vc.onSubmit = { [weak self] query in
             guard let self, let ctx = self.lastCtx else { return }
-            self.overlay.submit(query: query, context: ctx, tars: self.tars)
+            let enrichedQuery = self.overlay.queryWithCapturedContext(query)
+            self.overlay.submit(query: enrichedQuery, context: ctx, tars: self.tars)
         }
     }
 
@@ -1254,25 +1317,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 extension Notification.Name {
     static let magicPointerSubmit             = Notification.Name("magicPointerSubmit")
     static let magicPointerSelectionCancelled = Notification.Name("magicPointerSelectionCancelled")
-}
-
-// ─────────────────────────────────────────────
-// MARK: — NSBezierPath reversed (scrim cutout)
-// ─────────────────────────────────────────────
-
-extension NSBezierPath {
-    var reversed: NSBezierPath {
-        let rev = NSBezierPath()
-        var pts = [NSPoint](repeating: .zero, count: 3)
-        for i in (0..<elementCount).reversed() {
-            switch element(at: i, associatedPoints: &pts) {
-            case .moveTo:    rev.move(to: pts[0])
-            case .lineTo:    rev.line(to: pts[0])
-            case .curveTo:   rev.curve(to: pts[2], controlPoint1: pts[0], controlPoint2: pts[1])
-            case .closePath: rev.close()
-            default: break
-            }
-        }
-        return rev
-    }
 }

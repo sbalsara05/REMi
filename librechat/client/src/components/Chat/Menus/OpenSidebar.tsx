@@ -34,7 +34,7 @@ export default function OpenSidebar({ className }: { className?: string }) {
           aria-expanded={false}
           aria-controls="chat-history-nav"
           className={cn(
-            'rounded-xl bg-presentation duration-0 hover:bg-surface-active-alt',
+            'glass-popover rounded-xl duration-0 hover:bg-surface-active-alt/80',
             className,
           )}
           onClick={handleClick}

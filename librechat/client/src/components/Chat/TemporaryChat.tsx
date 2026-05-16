@@ -40,7 +40,7 @@ export function TemporaryChat() {
               'inline-flex size-9 flex-shrink-0 items-center justify-center rounded-xl border border-border-light text-text-primary transition-all ease-in-out',
               isTemporary
                 ? 'bg-surface-active'
-                : 'bg-presentation shadow-sm hover:bg-surface-active-alt',
+                : 'glass-popover shadow-sm hover:bg-surface-active-alt/80',
             )}
           >
             <MessageCircleDashed className="icon-md" aria-hidden="true" />

@@ -22,6 +22,7 @@ import { UnifiedSidebar } from '~/components/UnifiedSidebar';
 import { TermsAndConditionsModal } from '~/components/ui';
 import { useHealthCheck } from '~/data-provider';
 import { Banner } from '~/components/Banners';
+import RemiAmbient from '~/components/Glass/RemiAmbient';
 
 export default function Root() {
   const [showTerms, setShowTerms] = useState(false);
@@ -71,7 +72,7 @@ export default function Root() {
             <PromptGroupsProvider>
               <Banner onHeightChange={setBannerHeight} />
               <div className="flex" style={{ height: `calc(100dvh - ${bannerHeight}px)` }}>
-                <div className="relative z-0 flex h-full w-full overflow-hidden">
+                <RemiAmbient>
                   <UnifiedSidebar />
                   <div
                     className="relative flex h-full max-w-full flex-1 flex-col overflow-hidden"
@@ -84,7 +85,7 @@ export default function Root() {
                   >
                     <Outlet />
                   </div>
-                </div>
+                </RemiAmbient>
               </div>
             </PromptGroupsProvider>
           </AgentsMapContext.Provider>

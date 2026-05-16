@@ -1,14 +1,6 @@
 import { useMemo } from 'react';
 import { MCPIcon, AttachmentIcon, OpenAIMinimalIcon } from '@librechat/client';
-import {
-  Bot,
-  Brain,
-  Bookmark,
-  NotebookPen,
-  ScrollText,
-  ArrowRightToLine,
-  SlidersHorizontal,
-} from 'lucide-react';
+import { ShellIcons } from '~/components/Icons';
 import {
   Permissions,
   EModelEndpoint,
@@ -34,6 +26,7 @@ import { MemoryPanel } from '~/components/SidePanel/Memories';
 import FilesPanel from '~/components/SidePanel/Files/Panel';
 import { PromptsAccordion } from '~/components/Prompts';
 import { SkillsAccordion } from '~/components/Skills';
+import MouseHistoryPanel from '~/components/Remi/MouseHistoryPanel';
 
 export default function useSideNavLinks({
   hidePanel,
@@ -105,7 +98,7 @@ export default function useSideNavLinks({
       links.push({
         title: 'com_sidepanel_agent_builder',
         label: '',
-        icon: Bot,
+        icon: ShellIcons.agent,
         id: EModelEndpoint.agents,
         Component: AgentPanelSwitch,
       });
@@ -134,7 +127,7 @@ export default function useSideNavLinks({
       links.push({
         title: 'com_ui_skills',
         label: '',
-        icon: ScrollText,
+        icon: ShellIcons.skills,
         id: 'skills',
         Component: SkillsAccordion,
       });
@@ -144,7 +137,7 @@ export default function useSideNavLinks({
       links.push({
         title: 'com_ui_prompts',
         label: '',
-        icon: NotebookPen,
+        icon: ShellIcons.prompts,
         id: 'prompts',
         Component: PromptsAccordion,
       });
@@ -154,7 +147,7 @@ export default function useSideNavLinks({
       links.push({
         title: 'com_ui_memories',
         label: '',
-        icon: Brain,
+        icon: ShellIcons.memories,
         id: 'memories',
         Component: MemoryPanel,
       });
@@ -164,9 +157,19 @@ export default function useSideNavLinks({
       links.push({
         title: 'com_sidepanel_conversation_tags',
         label: '',
-        icon: Bookmark,
+        icon: ShellIcons.bookmarks,
         id: 'bookmarks',
         Component: BookmarkPanel,
+      });
+    }
+
+    if (interfaceConfig.remi?.mouseHistory === true) {
+      links.push({
+        title: 'com_sidepanel_remi_mouse_history',
+        label: '',
+        icon: ShellIcons.remiMouseHistory,
+        id: 'remi-mouse-history',
+        Component: MouseHistoryPanel,
       });
     }
 
@@ -187,7 +190,7 @@ export default function useSideNavLinks({
       links.push({
         title: 'com_sidepanel_parameters',
         label: '',
-        icon: SlidersHorizontal,
+        icon: ShellIcons.parameters,
         id: 'parameters',
         Component: Parameters,
       });
@@ -210,7 +213,7 @@ export default function useSideNavLinks({
       links.push({
         title: 'com_sidepanel_hide_panel',
         label: '',
-        icon: ArrowRightToLine,
+        icon: ShellIcons.hidePanel,
         onClick: hidePanel,
         id: 'hide-panel',
       });
@@ -229,6 +232,7 @@ export default function useSideNavLinks({
     hasAccessToMemories,
     hasAccessToReadMemories,
     interfaceConfig.parameters,
+    interfaceConfig.remi?.mouseHistory,
     endpointType,
     hasAccessToBookmarks,
     availableMCPServers,

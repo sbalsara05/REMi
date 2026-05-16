@@ -1281,3 +1281,48 @@ export interface ActiveJobsResponse {
 export const getActiveJobs = (): Promise<ActiveJobsResponse> => {
   return request.get(endpoints.activeJobs());
 };
+
+export type TRemiInteraction = {
+  id: string;
+  createdAt: number;
+  prompt?: string | null;
+  responseSoFar?: string | null;
+  screenshotPath?: string | null;
+  model?: string | null;
+  cropHash?: string | null;
+  syncedToChat: boolean;
+  conversationId?: string | null;
+};
+
+export type TRemiInteractionsResponse = {
+  interactions: TRemiInteraction[];
+  nextCursor: string | null;
+};
+
+export function listRemiInteractions(
+  params?: { cursor?: string | null; limit?: number },
+): Promise<TRemiInteractionsResponse> {
+  return request.get(endpoints.remiInteractions(params?.cursor, params?.limit));
+}
+
+export function getRemiInteraction(id: string): Promise<TRemiInteraction> {
+  return request.get(endpoints.remiInteraction(id));
+}
+
+export function postRemiContext(body: {
+  interactionId?: string;
+  prompt?: string;
+  response_so_far?: string;
+  screenshot?: string;
+  model?: string;
+  crop_hash?: string;
+}): Promise<TRemiInteraction> {
+  return request.post(endpoints.remiContext(), body);
+}
+
+export function postRemiHandoff(interactionId: string): Promise<{
+  conversationId: string;
+  alreadySynced?: boolean;
+}> {
+  return request.post(endpoints.remiHandoff(), { interactionId });
+}

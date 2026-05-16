@@ -163,7 +163,7 @@ function FeedbackButtons({
         gutter={8}
         portal
         unmountOnHide
-        className="popover-animate flex w-auto flex-col gap-1.5 overflow-hidden rounded-2xl border border-border-medium bg-surface-secondary p-1.5 shadow-lg"
+        className="glass-popover popover-animate flex w-auto flex-col gap-1.5 overflow-hidden rounded-2xl border border-border-medium p-1.5 shadow-lg"
       >
         <div className="flex flex-col items-stretch justify-center">
           {positiveTags.map((tag) => (
@@ -197,7 +197,7 @@ function FeedbackButtons({
         gutter={8}
         portal
         unmountOnHide
-        className="popover-animate flex w-auto flex-col gap-1.5 overflow-hidden rounded-2xl border border-border-medium bg-surface-secondary p-1.5 shadow-lg"
+        className="glass-popover popover-animate flex w-auto flex-col gap-1.5 overflow-hidden rounded-2xl border border-border-medium p-1.5 shadow-lg"
       >
         <div className="flex flex-col items-stretch justify-center">
           {negativeTags.map((tag) => (

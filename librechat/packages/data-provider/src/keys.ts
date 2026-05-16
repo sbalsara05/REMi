@@ -38,6 +38,7 @@ export enum QueryKeys {
   voices = 'voices',
   customConfigSpeech = 'customConfigSpeech',
   prompts = 'prompts',
+  remiInteractions = 'remiInteractions',
   prompt = 'prompt',
   promptGroups = 'promptGroups',
   allPromptGroups = 'allPromptGroups',

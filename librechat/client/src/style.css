@@ -2936,3 +2936,255 @@ html {
 .sharepoint-picker-bg {
   background-color: #f5f5f5;
 }
+
+/* ==========================================================================
+   REMi — Glass overlay design system
+   ========================================================================== */
+
+:root {
+  --remi-ambient-1: #f4f6fb;
+  --remi-ambient-2: #e8ecf6;
+  --remi-ambient-3: #dce4f4;
+  --remi-ambient-4: #eef0fa;
+  --remi-orb-violet: 171 104 255;
+  --remi-orb-teal: 45 212 191;
+  --remi-orb-blue: 96 165 250;
+  --rgb-presentation: 255 255 255;
+  --rgb-surface-primary-alt: 247 247 248;
+  --rgb-surface-chat: 255 255 255;
+  --glass-border-light: rgba(255, 255, 255, 0.55);
+  --glass-shadow: 0 8px 32px rgba(15, 23, 42, 0.08);
+  --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.dark {
+  --remi-ambient-1: #0a0a0f;
+  --remi-ambient-2: #12121a;
+  --remi-ambient-3: #1a1528;
+  --remi-ambient-4: #0f0f14;
+  --remi-orb-violet: 171 104 255;
+  --remi-orb-teal: 45 212 191;
+  --remi-orb-blue: 96 165 250;
+  --rgb-presentation: 33 33 33;
+  --rgb-surface-primary-alt: 23 23 23;
+  --rgb-surface-chat: 47 47 47;
+  --glass-border-light: rgba(255, 255, 255, 0.08);
+  --glass-shadow: 0 8px 40px rgba(0, 0, 0, 0.45);
+  --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+@keyframes remi-mesh-drift {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@keyframes glass-shimmer {
+  0% {
+    --glass-shimmer-angle: 0deg;
+  }
+  100% {
+    --glass-shimmer-angle: 360deg;
+  }
+}
+
+@keyframes glass-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.06);
+  }
+}
+
+@keyframes glass-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@layer components {
+  .remi-ambient-bg {
+    position: relative;
+    isolation: isolate;
+    background: linear-gradient(
+      135deg,
+      var(--remi-ambient-1) 0%,
+      var(--remi-ambient-2) 35%,
+      var(--remi-ambient-3) 65%,
+      var(--remi-ambient-4) 100%
+    );
+    background-size: 200% 200%;
+    animation: remi-mesh-drift 32s ease-in-out infinite;
+  }
+
+  .remi-ambient-bg::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.35;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.4'/%3E%3C/svg%3E");
+    mix-blend-mode: overlay;
+    z-index: 0;
+  }
+
+  .remi-orb {
+    position: absolute;
+    pointer-events: none;
+    border-radius: 9999px;
+    filter: blur(64px);
+    animation: glass-breathe 8s ease-in-out infinite;
+    z-index: 0;
+  }
+
+  .remi-orb--violet {
+    background: rgb(var(--remi-orb-violet) / 0.35);
+  }
+
+  .remi-orb--teal {
+    background: rgb(var(--remi-orb-teal) / 0.22);
+    animation-delay: -2s;
+  }
+
+  .remi-orb--blue {
+    background: rgb(var(--remi-orb-blue) / 0.2);
+    animation-delay: -4s;
+  }
+
+  .glass-panel {
+    background: rgb(var(--rgb-surface-primary-alt) / 0.5);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border-light);
+    box-shadow: var(--glass-shadow), var(--glass-inset);
+  }
+
+  .glass-panel--strong {
+    background: rgb(var(--rgb-surface-chat) / 0.72);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--glass-border-light);
+    box-shadow: var(--glass-shadow), var(--glass-inset);
+  }
+
+  .glass-panel--active {
+    position: relative;
+    background: rgb(var(--rgb-surface-primary-alt) / 0.62);
+    box-shadow: var(--glass-shadow), var(--glass-inset), 0 0 0 1px rgb(var(--remi-orb-violet) / 0.35);
+  }
+
+  .glass-panel--active::after {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(
+      from var(--glass-shimmer-angle, 0deg),
+      transparent 0%,
+      rgb(var(--remi-orb-violet) / 0.5) 25%,
+      transparent 50%
+    );
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    -webkit-mask-composite: xor;
+    pointer-events: none;
+    animation: glass-shimmer 4s linear infinite;
+  }
+
+  .glass-bar {
+    background: rgb(var(--rgb-presentation) / 0.55);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--glass-border-light);
+    box-shadow: 0 4px 24px rgba(15, 23, 42, 0.06);
+  }
+
+  .glass-composer {
+    background: rgb(var(--rgb-surface-chat) / 0.7);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border-color: var(--glass-border-light) !important;
+    box-shadow: var(--glass-shadow), var(--glass-inset);
+    transition:
+      box-shadow 0.25s ease,
+      border-color 0.25s ease;
+  }
+
+  .glass-composer:focus-within {
+    box-shadow:
+      var(--glass-shadow),
+      var(--glass-inset),
+      0 0 0 1px rgb(var(--remi-orb-violet) / 0.45),
+      0 0 24px rgb(var(--remi-orb-violet) / 0.15);
+  }
+
+  .glass-popover {
+    background: rgb(var(--rgb-surface-primary-alt) / 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border-light);
+    box-shadow: var(--glass-shadow);
+  }
+
+  .glass-card {
+    background: rgb(var(--rgb-surface-primary-alt) / 0.45);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--glass-border-light);
+    box-shadow: var(--glass-shadow), var(--glass-inset);
+    animation: glass-enter 0.45s ease-out both;
+    animation-delay: calc(var(--stagger-index, 0) * 60ms);
+  }
+
+  .glass-stagger > * {
+    --stagger-index: 0;
+  }
+
+  .remi-shell-layer {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+@media (min-width: 768px) {
+  .glass-panel {
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .remi-ambient-bg {
+    animation: none;
+    background-size: 100% 100%;
+  }
+
+  .remi-orb {
+    animation: none;
+    opacity: 0.35;
+  }
+
+  .glass-panel--active::after {
+    animation: none;
+  }
+
+  .glass-card {
+    animation: none;
+  }
+}

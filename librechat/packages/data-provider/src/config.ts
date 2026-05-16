@@ -973,6 +973,11 @@ export const interfaceSchema = z
         }),
       ])
       .optional(),
+    remi: z
+      .object({
+        mouseHistory: z.boolean().optional(),
+      })
+      .optional(),
   })
   .default({
     modelSelect: true,

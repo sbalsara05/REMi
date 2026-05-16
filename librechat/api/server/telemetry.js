@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('../config/loadEnv');
 
 function isTruthy(value) {
   return value?.trim().toLowerCase() === 'true';

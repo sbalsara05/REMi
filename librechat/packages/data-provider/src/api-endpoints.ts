@@ -131,6 +131,26 @@ export const search = (q: string, cursor?: string | null) =>
 
 export const searchEnabled = () => `${BASE_URL}/api/search/enable`;
 
+const remiRoot = `${BASE_URL}/api/remi`;
+
+export const remiInteractions = (cursor?: string | null, limit?: number) => {
+  const params = new URLSearchParams();
+  if (cursor) {
+    params.set('cursor', cursor);
+  }
+  if (limit) {
+    params.set('limit', String(limit));
+  }
+  const qs = params.toString();
+  return qs ? `${remiRoot}/interactions?${qs}` : `${remiRoot}/interactions`;
+};
+
+export const remiInteraction = (id: string) => `${remiRoot}/interactions/${id}`;
+
+export const remiContext = () => `${remiRoot}/context`;
+
+export const remiHandoff = () => `${remiRoot}/handoff`;
+
 export const presets = () => `${BASE_URL}/api/presets`;
 
 export const deletePreset = () => `${BASE_URL}/api/presets/delete`;

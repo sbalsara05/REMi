@@ -16,16 +16,19 @@ fi
 [[ -d "$LC_DIR" ]] || _remi_die "librechat/ not found."
 
 remi_ensure_env_file
-remi_export_compose_env
 remi_sync_librechat_config
+remi_link_librechat_env
+remi_export_compose_env
 
 cd "$LC_DIR"
 
+COMPOSE_FILES=(-f docker-compose.yml -f "$REMI_ROOT/config/docker-compose.remi.yaml")
+
 echo "Starting MongoDB and Meilisearch..."
-docker compose --env-file "$REMI_ENV_FILE" up -d mongodb meilisearch
+remi_docker_compose "${COMPOSE_FILES[@]}" up -d mongodb meilisearch
 
 echo "Starting REMi (LibreChat + OpenRouter)..."
-docker compose --env-file "$REMI_ENV_FILE" up -d api
+remi_docker_compose "${COMPOSE_FILES[@]}" up -d api
 
 echo ""
 echo "REMi is starting at http://localhost:${PORT}"

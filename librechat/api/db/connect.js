@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('../config/loadEnv');
 const { isEnabled } = require('@librechat/api');
 const { logger } = require('@librechat/data-schemas');
 

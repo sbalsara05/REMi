@@ -65,4 +65,17 @@ describe('loadDefaultInterface', () => {
 
     expect(interfaceConfig).not.toHaveProperty('temporaryChatRetention');
   });
+
+  it('preserves REMi interface settings', async () => {
+    const interfaceConfig = await loadDefaultInterface({
+      config: {
+        interface: {
+          remi: { mouseHistory: true },
+        },
+      },
+      configDefaults: getConfigDefaults(),
+    });
+
+    expect(interfaceConfig?.remi).toEqual({ mouseHistory: true });
+  });
 });

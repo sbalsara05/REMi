@@ -1,0 +1,35 @@
+# REMi compose overlay — run from librechat/ via scripts/start-mac.sh
+# First run with REMi routes: docker compose ... build api  (includes better-sqlite3)
+services:
+  api:
+    build:
+      context: .
+      target: node
+    image: remi-librechat-api:local
+    volumes:
+      # Use librechat/.env (symlink to repo-root env.local). Do not mount ../env.local — path
+      # resolution varies and Docker may create a stray env.local directory on the host.
+      - type: bind
+        source: ./librechat.yaml
+        target: /app/librechat.yaml
+      - type: bind
+        source: ${REMI_HANDOFF_HOST_DIR:-${HOME}/Library/Application Support/REMi}
+        target: /remi-handoff
+    environment:
+      - REMI_HANDOFF_DB_PATH=/remi-handoff/interactions.sqlite
+
+  # Expose DB ports for native dev (npm run backend:dev on the host)
+  mongodb:
+    ports:
+      - "27017:27017"
+
+  meilisearch:
+    ports:
+      - "7700:7700"
+
+  # RAG (file uploads / document search) — reachable from host-native backend:dev
+  rag_api:
+    ports:
+      - "${RAG_PORT:-8000}:${RAG_PORT:-8000}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

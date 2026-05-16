@@ -26,16 +26,27 @@ remi_ensure_env_file() {
 
 remi_export_compose_env() {
   set -a
-  # shellcheck disable=SC1090
-  source "$REMI_ENV_FILE"
+  # Do not assign UID/GID in the shell — macOS defines UID as readonly.
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line//[[:space:]]/}" ]] && continue
+    [[ "$line" =~ ^UID= ]] && continue
+    [[ "$line" =~ ^GID= ]] && continue
+    export "$line"
+  done <"$REMI_ENV_FILE"
   set +a
-  export UID="${UID:-$(id -u)}"
-  export GID="${GID:-$(id -g)}"
   export PORT="${PORT:-3080}"
+}
+
+# Run docker compose with UID/GID for volume permissions (macOS UID is readonly in zsh/bash).
+remi_docker_compose() {
+  env UID="$(id -u)" GID="$(id -g)" docker compose --env-file "$REMI_ENV_FILE" "$@"
 }
 
 remi_link_librechat_env() {
   ln -sf "$REMI_ENV_FILE" "$REMI_LC_DIR/.env"
+  # Absolute path for compose (avoids wrong ../env.local resolution across duplicate REMi folders)
+  export REMI_ENV_FILE_ABS="$(cd "$(dirname "$REMI_ENV_FILE")" && pwd)/$(basename "$REMI_ENV_FILE")"
 }
 
 remi_sync_librechat_config() {

@@ -1,7 +1,7 @@
 import { memo, useCallback, lazy, Suspense } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRecoilValue } from 'recoil';
-import { SquarePen } from 'lucide-react';
+import { ShellIcons } from '~/components/Icons';
 import { QueryKeys } from 'librechat-data-provider';
 import { Skeleton, Sidebar, Button, TooltipAnchor } from '@librechat/client';
 import type { NavLink } from '~/common';
@@ -51,7 +51,7 @@ const NewChatButton = memo(function NewChatButton({
           className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-surface-hover"
           onClick={handleClick}
         >
-          <SquarePen className="h-5 w-5 text-text-primary" />
+          <ShellIcons.newChat className="h-5 w-5 text-text-primary" />
         </a>
       }
     />
@@ -107,7 +107,9 @@ const NavIconButton = memo(function NavIconButton({
           aria-pressed={isActive}
           className={cn(
             'h-9 w-9 rounded-lg',
-            isActive ? 'bg-surface-active-alt text-text-primary' : 'text-text-secondary',
+            isActive
+              ? 'glass-panel--active text-text-primary'
+              : 'text-text-secondary hover:bg-surface-hover/50',
           )}
           onClick={handleClick}
         >
@@ -137,7 +139,7 @@ function ExpandedPanel({
   const toggleClick = expanded ? onCollapse : onExpand;
 
   return (
-    <div className="flex h-full flex-shrink-0 flex-col gap-2 border-r border-border-light bg-surface-primary-alt px-2 py-2">
+    <div className="glass-panel flex h-full flex-shrink-0 flex-col gap-2 border-r border-border-light/50 px-2 py-2">
       <TooltipAnchor
         side="right"
         description={localize(toggleLabel)}
@@ -152,7 +154,7 @@ function ExpandedPanel({
             className="h-9 w-9 rounded-lg"
             onClick={toggleClick}
           >
-            <Sidebar aria-hidden="true" className="h-5 w-5 text-text-primary" />
+            <ShellIcons.sidebarToggle aria-hidden="true" className="h-5 w-5 text-text-primary" />
           </Button>
         }
       />

@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('../config/loadEnv');
 const fs = require('fs');
 const path = require('path');
 require('module-alias')({ base: path.resolve(__dirname, '..') });

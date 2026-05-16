@@ -49,7 +49,7 @@ export const CustomMenu = React.forwardRef<HTMLDivElement, CustomMenuProps>(func
             'flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-border-light px-3 py-2 text-sm text-text-primary',
           menuStore.useState('open')
             ? 'bg-surface-active-alt hover:bg-surface-active-alt'
-            : 'bg-presentation hover:bg-surface-active-alt',
+            : 'glass-popover hover:bg-surface-active-alt/80',
           props.className,
         )}
         render={parent ? <CustomMenuItem render={trigger} /> : trigger}
@@ -67,7 +67,7 @@ export const CustomMenu = React.forwardRef<HTMLDivElement, CustomMenuProps>(func
           parent ? 'animate-popover-left ml-3' : 'animate-popover',
           'outline-none! z-40 flex max-h-[min(450px,var(--popover-available-height))] w-full',
           'w-[var(--menu-width,auto)] min-w-[300px] flex-col overflow-auto rounded-xl border border-border-light',
-          'bg-presentation text-sm text-text-primary shadow-lg',
+          'glass-popover text-sm text-text-primary shadow-lg',
           parent ? 'px-0.5 py-0.5' : 'px-3 py-2',
           'max-w-[calc(100vw-4rem)] sm:max-h-[calc(65vh)] sm:max-w-[400px]',
           searchable && 'p-0',

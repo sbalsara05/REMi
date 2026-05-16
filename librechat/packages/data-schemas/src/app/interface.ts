@@ -56,6 +56,7 @@ export async function loadDefaultInterface({
     marketplace: interfaceConfig?.marketplace,
     remoteAgents: interfaceConfig?.remoteAgents,
     skills: interfaceConfig?.skills,
+    remi: interfaceConfig?.remi,
   });
 
   return loadedInterface;

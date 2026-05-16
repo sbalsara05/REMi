@@ -25,7 +25,7 @@ enum Config {
     static let tarsBaseURL                = "http://localhost:8080"
     static let wiggleThreshold: Int       = 3
     static let wiggleWindowSeconds        = 1.2
-    static let wiggleMinDistance: CGFloat = 18
+    static let wiggleMinDistance: CGFloat = 28
     static let wiggleCooldownSeconds      = 1.0
     static let overlayWidth: CGFloat      = 540
     static let overlayHeight: CGFloat     = 124

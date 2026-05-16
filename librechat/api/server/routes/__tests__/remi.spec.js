@@ -112,6 +112,25 @@ describe('REMi routes', () => {
         syncedToChat: false,
       });
     });
+
+    it('returns 500 when interactionId would escape the screenshots directory', async () => {
+      const escapeTarget = path.resolve(
+        handoffStore.getScreenshotsDir(),
+        '../../../tmp/evil.png',
+      );
+
+      const response = await request(app)
+        .post('/api/remi/context')
+        .set('Authorization', 'Bearer test-token')
+        .send({
+          interactionId: '../../../tmp/evil',
+          screenshot: ONE_BY_ONE_PNG_BASE64,
+        });
+
+      expect(response.status).toBe(500);
+      expect(response.body).toEqual({ error: 'Failed to save context' });
+      expect(fs.existsSync(escapeTarget)).toBe(false);
+    });
   });
 
   describe('GET /interactions', () => {

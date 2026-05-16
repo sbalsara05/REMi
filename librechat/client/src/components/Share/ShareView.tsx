@@ -24,6 +24,7 @@ import { ShareContext } from '~/Providers';
 import { ShareMessagesProvider } from './ShareMessagesProvider';
 import MessagesView from './MessagesView';
 import Footer from '../Chat/Footer';
+import RemiAmbient from '~/components/Glass/RemiAmbient';
 import { cn } from '~/utils';
 import store from '~/store';
 
@@ -150,8 +151,9 @@ function SharedView() {
 
   return (
     <ShareContext.Provider value={{ isSharedConvo: true }}>
-      <div className="relative flex h-screen w-full overflow-hidden dark:bg-surface-secondary">
-        <main className="relative flex w-full grow overflow-hidden dark:bg-surface-secondary">
+      <div className="relative flex h-screen w-full overflow-hidden bg-[#0a0a0f] dark:bg-surface-secondary">
+        <RemiAmbient />
+        <main className="relative z-[1] flex w-full grow overflow-hidden dark:bg-surface-secondary">
           {artifactsContainer}
         </main>
       </div>

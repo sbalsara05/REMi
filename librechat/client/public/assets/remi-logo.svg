@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 48" role="img" aria-label="REMi">
+  <rect width="120" height="48" fill="#0a0a0f" rx="8"/>
+  <text x="60" y="14" text-anchor="middle" fill="#ab68ff" font-family="ui-monospace,Menlo,monospace" font-size="7">  _ </text>
+  <text x="60" y="24" text-anchor="middle" fill="#f5f0eb" font-family="ui-monospace,Menlo,monospace" font-size="7"> (c).-.</text>
+  <text x="60" y="34" text-anchor="middle" fill="#bbbbbb" font-family="ui-monospace,Menlo,monospace" font-size="7"> .-'`</text>
+  <text x="60" y="44" text-anchor="middle" fill="#ab68ff" font-family="Inter,system-ui,sans-serif" font-size="11" font-weight="600" letter-spacing="0.2em">REMi</text>
+</svg>

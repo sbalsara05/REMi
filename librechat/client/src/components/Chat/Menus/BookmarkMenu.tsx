@@ -4,7 +4,7 @@ import * as Ariakit from '@ariakit/react';
 import { BookmarkPlusIcon } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Constants, QueryKeys } from 'librechat-data-provider';
-import { BookmarkFilledIcon, BookmarkIcon } from '@radix-ui/react-icons';
+import { ShellIcons } from '~/components/Icons';
 import { DropdownPopup, TooltipAnchor, Spinner, useToastContext } from '@librechat/client';
 import type { TConversationTag } from 'librechat-data-provider';
 import type { FC } from 'react';
@@ -157,9 +157,9 @@ const BookmarkMenu: FC = () => {
       return <Spinner aria-label="Spinner" />;
     }
     if (hasBookmarks) {
-      return <BookmarkFilledIcon className="icon-md" aria-hidden="true" />;
+      return <ShellIcons.bookmarks className="text-text-primary" aria-hidden="true" />;
     }
-    return <BookmarkIcon className="icon-md" aria-hidden="true" />;
+    return <ShellIcons.bookmark className="text-text-primary" aria-hidden="true" />;
   };
 
   return (
@@ -181,7 +181,7 @@ const BookmarkMenu: FC = () => {
                 aria-label={buttonAriaLabel}
                 aria-pressed={hasBookmarks}
                 className={cn(
-                  'glass-popover mt-text-sm flex size-9 flex-shrink-0 items-center justify-center gap-2 rounded-xl border border-border-light text-sm transition-colors duration-200 hover:bg-surface-hover/80',
+                  'glass-popover remi-radius-control mt-text-sm flex size-9 flex-shrink-0 items-center justify-center gap-2 border border-border-light text-sm transition-colors duration-200 hover:bg-surface-hover/80',
                   isMenuOpen ? 'bg-surface-hover' : '',
                 )}
                 data-testid="bookmark-menu"

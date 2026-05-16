@@ -6,4 +6,5 @@ librechat/data-node/
 librechat/meili_data*/
 librechat/uploads/
 librechat/logs/
+librechat/log/
 .env.local

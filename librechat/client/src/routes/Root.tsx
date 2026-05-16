@@ -75,7 +75,7 @@ export default function Root() {
                 <RemiAmbient>
                   <UnifiedSidebar />
                   <div
-                    className="relative flex h-full max-w-full flex-1 flex-col overflow-hidden"
+                    className="remi-fade-in relative flex h-full max-w-full flex-1 flex-col overflow-hidden"
                     style={{
                       transform:
                         isSmallScreen && sidebarExpanded ? 'translateX(min(85vw, 380px))' : 'none',

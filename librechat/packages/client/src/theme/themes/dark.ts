@@ -25,11 +25,11 @@ export const darkTheme: IThemeRGB = {
   'rgb-surface-active-alt': '47 47 47', // #2f2f2f (gray-700)
   'rgb-surface-hover': '66 66 66', // #424242 (gray-600)
   'rgb-surface-hover-alt': '66 66 66', // #424242 (gray-600)
-  'rgb-surface-primary': '13 13 13', // #0d0d0d (gray-900)
-  'rgb-surface-primary-alt': '23 23 23', // #171717 (gray-850)
-  'rgb-surface-primary-contrast': '23 23 23', // #171717 (gray-850)
-  'rgb-surface-secondary': '33 33 33', // #212121 (gray-800)
-  'rgb-surface-secondary-alt': '33 33 33', // #212121 (gray-800)
+  'rgb-surface-primary': '10 10 15', // #0a0a0f REMi canvas
+  'rgb-surface-primary-alt': '26 26 26', // #1a1a1a elevated glass
+  'rgb-surface-primary-contrast': '38 38 38', // #262626
+  'rgb-surface-secondary': '26 26 26', // #1a1a1a
+  'rgb-surface-secondary-alt': '38 38 38', // #262626
   'rgb-surface-tertiary': '47 47 47', // #2f2f2f (gray-700)
   'rgb-surface-tertiary-alt': '47 47 47', // #2f2f2f (gray-700)
   'rgb-surface-dialog': '23 23 23', // #171717 (gray-850)
@@ -50,7 +50,7 @@ export const darkTheme: IThemeRGB = {
   'rgb-brand-purple': '171 104 255', // #ab68ff
 
   // Presentation
-  'rgb-presentation': '33 33 33', // #212121 (gray-800)
+  'rgb-presentation': '26 26 26', // #1a1a1a
 
   // Utility colors (mapped to existing colors for backwards compatibility)
   'rgb-background': '33 33 33', // Same as surface-primary

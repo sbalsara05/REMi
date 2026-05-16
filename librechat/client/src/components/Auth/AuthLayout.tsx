@@ -1,6 +1,8 @@
 import { ThemeSelector } from '@librechat/client';
 import { TStartupConfig } from 'librechat-data-provider';
 import { ErrorMessage } from '~/components/Auth/ErrorMessage';
+import { AsciiMouse } from '~/components/Icons';
+import RemiAmbient from '~/components/Glass/RemiAmbient';
 import { TranslationKeys, useLocalize } from '~/hooks';
 import SocialLoginRender from './SocialLoginRender';
 import { BlinkAnimation } from './BlinkAnimation';
@@ -25,6 +27,7 @@ function AuthLayout({
   error: TranslationKeys | null;
 }) {
   const localize = useLocalize();
+  const appTitle = startupConfig?.appTitle ?? 'REMi';
 
   const hasStartupConfigError = startupConfigError !== null && startupConfigError !== undefined;
   const DisplayError = () => {
@@ -34,7 +37,8 @@ function AuthLayout({
           <ErrorMessage>{localize('com_auth_error_login_server')}</ErrorMessage>
         </div>
       );
-    } else if (error === 'com_auth_error_invalid_reset_token') {
+    }
+    if (error === 'com_auth_error_invalid_reset_token') {
       return (
         <div className="mx-auto sm:max-w-sm">
           <ErrorMessage>
@@ -46,7 +50,8 @@ function AuthLayout({
           </ErrorMessage>
         </div>
       );
-    } else if (error != null && error) {
+    }
+    if (error != null && error) {
       return (
         <div className="mx-auto sm:max-w-sm">
           <ErrorMessage>{localize(error)}</ErrorMessage>
@@ -57,27 +62,30 @@ function AuthLayout({
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-white dark:bg-gray-900">
+    <div className="relative flex min-h-screen flex-col bg-[#0a0a0f] text-text-primary">
+      <RemiAmbient />
       <Banner />
       <BlinkAnimation active={isFetching}>
-        <div className="mt-6 h-10 w-full bg-cover">
-          <img
-            src="assets/logo.svg"
-            className="h-full w-full object-contain"
-            alt={localize('com_ui_logo', { 0: startupConfig?.appTitle ?? 'LibreChat' })}
+        <div className="relative z-[1] mt-8 flex flex-col items-center gap-2">
+          <AsciiMouse
+            variant="logoCompact"
+            size="md"
+            className="text-brand-purple"
+            title={localize('com_ui_logo', { 0: appTitle })}
           />
+          <span className="text-sm font-semibold tracking-[0.2em] text-text-primary">{appTitle}</span>
         </div>
       </BlinkAnimation>
       <DisplayError />
-      <div className="absolute bottom-0 left-0 md:m-4">
+      <div className="absolute bottom-0 left-0 z-[1] md:m-4">
         <ThemeSelector />
       </div>
 
-      <main className="flex flex-grow items-center justify-center">
-        <div className="w-authPageWidth overflow-hidden bg-white px-6 py-4 dark:bg-gray-900 sm:max-w-md sm:rounded-lg">
+      <main className="relative z-[1] flex flex-grow items-center justify-center px-4">
+        <div className="glass-modal remi-radius-card w-authPageWidth overflow-hidden px-6 py-4 sm:max-w-md">
           {!hasStartupConfigError && !isFetching && header && (
             <h1
-              className="mb-4 text-center text-3xl font-semibold text-black dark:text-white"
+              className="mb-4 text-center text-3xl font-semibold text-text-primary"
               style={{ userSelect: 'none' }}
             >
               {header}

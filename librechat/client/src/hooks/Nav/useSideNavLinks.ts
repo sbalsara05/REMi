@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { MCPIcon, AttachmentIcon, OpenAIMinimalIcon } from '@librechat/client';
+import { OpenAIMinimalIcon } from '@librechat/client';
 import { ShellIcons } from '~/components/Icons';
 import {
   Permissions,
@@ -176,7 +176,7 @@ export default function useSideNavLinks({
     links.push({
       title: 'com_sidepanel_attach_files',
       label: '',
-      icon: AttachmentIcon,
+      icon: ShellIcons.attach,
       id: 'files',
       Component: FilesPanel,
     });
@@ -203,7 +203,7 @@ export default function useSideNavLinks({
       links.push({
         title: 'com_nav_setting_mcp',
         label: '',
-        icon: MCPIcon,
+        icon: ShellIcons.mcp,
         id: 'mcp-builder',
         Component: MCPBuilderPanel,
       });

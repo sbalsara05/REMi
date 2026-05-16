@@ -1,46 +1,35 @@
-import type { FC } from 'react';
-import type { Icon, IconProps } from '@phosphor-icons/react';
-import {
-  ArrowLineRight,
-  BookmarkSimple,
-  Brain,
-  CursorClick,
-  Notebook,
-  PencilSimple,
-  Robot,
-  Scroll,
-  SidebarSimple,
-  SlidersHorizontal,
-  Sparkle,
-  WarningCircle,
-} from '@phosphor-icons/react';
+import { createAsciiShellIcon } from './createAsciiShellIcon';
 
-export type ShellIconComponent = FC<{ className?: string }>;
-
-export function createShellIcon(
-  PhosphorIcon: Icon,
-  weight: IconProps['weight'] = 'duotone',
-): ShellIconComponent {
-  function ShellIcon({ className }: { className?: string }) {
-    return <PhosphorIcon className={className} weight={weight} aria-hidden />;
-  }
-  ShellIcon.displayName = PhosphorIcon.displayName ?? 'ShellIcon';
-  return ShellIcon;
-}
+export { createAsciiShellIcon } from './createAsciiShellIcon';
+export type { ShellIconComponent } from './createAsciiShellIcon';
 
 export const ShellIcons = {
-  agent: createShellIcon(Robot),
-  skills: createShellIcon(Scroll),
-  prompts: createShellIcon(Notebook),
-  memories: createShellIcon(Brain),
-  bookmarks: createShellIcon(BookmarkSimple),
-  remiMouseHistory: createShellIcon(CursorClick),
-  parameters: createShellIcon(SlidersHorizontal, 'regular'),
-  hidePanel: createShellIcon(ArrowLineRight, 'regular'),
-  newChat: createShellIcon(PencilSimple, 'regular'),
-  sidebarToggle: createShellIcon(SidebarSimple, 'regular'),
-  sparkle: createShellIcon(Sparkle),
-  warning: createShellIcon(WarningCircle, 'regular'),
+  agent: createAsciiShellIcon('agent'),
+  skills: createAsciiShellIcon('skills'),
+  prompts: createAsciiShellIcon('prompts'),
+  memories: createAsciiShellIcon('memories'),
+  bookmarks: createAsciiShellIcon('bookmarks'),
+  remiMouseHistory: createAsciiShellIcon('micro'),
+  parameters: createAsciiShellIcon('parameters'),
+  hidePanel: createAsciiShellIcon('hidePanel'),
+  newChat: createAsciiShellIcon('newChat'),
+  sidebarToggle: createAsciiShellIcon('sidebarToggle'),
+  sparkle: createAsciiShellIcon('peek'),
+  warning: createAsciiShellIcon('warning'),
+  attach: createAsciiShellIcon('attach'),
+  mcp: createAsciiShellIcon('mcp'),
+  ai: createAsciiShellIcon('ai'),
+  menu: createAsciiShellIcon('menu'),
+  preset: createAsciiShellIcon('preset'),
+  bookmark: createAsciiShellIcon('bookmark'),
+  model: createAsciiShellIcon('model'),
+  tempChat: createAsciiShellIcon('tempChat'),
 } as const;
 
-export { CursorClick, Sparkle, WarningCircle };
+export { default as AsciiMouse } from './AsciiMouse';
+export {
+  ASCII_MOUSE_CATALOG,
+  ASCII_STREAM_CARET,
+  ASCII_STREAM_PREVIEW,
+  ASCII_THINKING,
+} from './asciiMouseCatalog';

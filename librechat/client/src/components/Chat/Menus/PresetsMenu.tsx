@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { useRecoilValue } from 'recoil';
 import { Trans } from 'react-i18next';
-import { BookCopy } from 'lucide-react';
+import { ShellIcons } from '~/components/Icons';
 import { Content, Portal, Root, Trigger } from '@radix-ui/react-popover';
 import {
   Button,
@@ -59,10 +59,10 @@ const PresetsMenu: FC = () => {
               id="presets-button"
               data-testid="presets-button"
               aria-label={localize('com_endpoint_examples')}
-              className="glass-popover h-9 w-9 shrink-0 rounded-xl duration-0 hover:bg-surface-active-alt/80"
+              className="glass-popover remi-radius-control h-9 w-9 shrink-0 duration-0 hover:bg-surface-active-alt/80"
               // className="inline-flex size-10 flex-shrink-0 items-center justify-center rounded-xl border border-border-light bg-transparent text-text-primary transition-all ease-in-out hover:bg-surface-tertiary disabled:pointer-events-none disabled:opacity-50 radix-state-open:bg-surface-tertiary"
             >
-              <BookCopy className="icon-md" aria-hidden="true" />
+              <ShellIcons.preset className="text-text-primary" aria-hidden="true" />
             </Button>
           }
         ></TooltipAnchor>

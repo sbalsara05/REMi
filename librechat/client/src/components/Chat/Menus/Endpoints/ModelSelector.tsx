@@ -67,7 +67,7 @@ function ModelSelectorContent() {
       description={localize('com_ui_select_model')}
       render={
         <button
-          className="glass-popover my-1 flex h-9 w-full max-w-[70vw] items-center justify-center gap-2 rounded-xl border border-border-light px-3 py-2 text-sm text-text-primary hover:bg-surface-active-alt/80"
+          className="glass-popover remi-radius-control my-1 flex h-9 w-full max-w-[70vw] items-center justify-center gap-2 border border-border-light px-3 py-2 text-sm text-text-primary hover:bg-surface-active-alt/80"
           aria-label={localize('com_ui_select_model')}
         >
           {selectedIcon && React.isValidElement(selectedIcon) && (

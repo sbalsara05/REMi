@@ -42,6 +42,7 @@ chmod +x scripts/start-mac.sh
 | `config/librechat.yaml` | OpenRouter endpoint + REMi UI flags |
 | `config/docker-compose.remi.yaml` | Mounts env, config, and handoff SQLite dir into API |
 | `docs/remi-handoff.md` | Mouse layer ↔ LibreChat integration contract |
+| `docs/design.md` | REMi brand system (ASCII mice, glass, meta, motion) |
 
 Default models: `openai/gpt-4o-mini`, `anthropic/claude-sonnet-4`, `google/gemini-2.5-flash-preview`. With `fetch: true`, the full OpenRouter catalog loads at runtime.
 

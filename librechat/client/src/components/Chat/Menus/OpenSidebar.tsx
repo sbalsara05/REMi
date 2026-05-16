@@ -1,6 +1,7 @@
 import { startTransition } from 'react';
 import { useSetRecoilState } from 'recoil';
-import { TooltipAnchor, Button, Sidebar } from '@librechat/client';
+import { TooltipAnchor, Button } from '@librechat/client';
+import { ShellIcons } from '~/components/Icons';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
 import store from '~/store';
@@ -34,12 +35,12 @@ export default function OpenSidebar({ className }: { className?: string }) {
           aria-expanded={false}
           aria-controls="chat-history-nav"
           className={cn(
-            'glass-popover rounded-xl duration-0 hover:bg-surface-active-alt/80',
+            'glass-popover remi-radius-control duration-0 hover:bg-surface-active-alt/80',
             className,
           )}
           onClick={handleClick}
         >
-          <Sidebar className="icon-md" aria-hidden="true" />
+          <ShellIcons.sidebarToggle className="text-text-primary" aria-hidden="true" />
         </Button>
       }
     />

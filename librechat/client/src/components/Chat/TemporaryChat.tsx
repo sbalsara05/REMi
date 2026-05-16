@@ -1,7 +1,7 @@
 import React from 'react';
 import { useRecoilValue } from 'recoil';
 import { TooltipAnchor } from '@librechat/client';
-import { MessageCircleDashed } from 'lucide-react';
+import { ShellIcons } from '~/components/Icons';
 import { useRecoilState, useRecoilCallback } from 'recoil';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
@@ -43,7 +43,7 @@ export function TemporaryChat() {
                 : 'glass-popover shadow-sm hover:bg-surface-active-alt/80',
             )}
           >
-            <MessageCircleDashed className="icon-md" aria-hidden="true" />
+            <ShellIcons.tempChat className="text-text-primary" aria-hidden="true" />
           </button>
         }
       />

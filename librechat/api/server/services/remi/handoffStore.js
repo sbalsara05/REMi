@@ -101,17 +101,48 @@ function getInteraction(id) {
   return mapRow(row);
 }
 
+const INTERACTION_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+
+function validateInteractionId(id) {
+  if (!id || typeof id !== 'string' || !INTERACTION_ID_PATTERN.test(id)) {
+    throw new Error('Invalid interactionId');
+  }
+}
+
+function resolveScreenshotPath(interactionId) {
+  validateInteractionId(interactionId);
+  const screenshotsDir = path.resolve(getScreenshotsDir());
+  const dest = path.resolve(path.join(screenshotsDir, `${interactionId}.png`));
+  if (!dest.startsWith(`${screenshotsDir}${path.sep}`)) {
+    throw new Error('Invalid interactionId');
+  }
+  return dest;
+}
+
 function writeScreenshotFromBase64(base64, interactionId) {
+  const dest = resolveScreenshotPath(interactionId);
   const buffer = Buffer.from(base64, 'base64');
-  const filename = `${interactionId}.png`;
-  const dest = path.join(getScreenshotsDir(), filename);
   fs.writeFileSync(dest, buffer);
   return dest;
 }
 
+function patchResponseSoFar(id, responseSoFar) {
+  validateInteractionId(id);
+  const db = getDb();
+  db.prepare(`UPDATE interactions SET response_so_far = ? WHERE id = ?`).run(
+    responseSoFar,
+    id,
+  );
+  return getInteraction(id);
+}
+
 function upsertInteraction(data) {
   const db = getDb();
-  const id = data.id ?? data.interactionId ?? uuidv4();
+  const rawId = data.id ?? data.interactionId;
+  const id = rawId ?? uuidv4();
+  if (rawId) {
+    validateInteractionId(id);
+  }
   const now = data.created_at ?? Date.now();
 
   let screenshotPath = data.screenshot_path ?? null;
@@ -160,9 +191,11 @@ function closeDb() {
 module.exports = {
   getDbPath,
   getScreenshotsDir,
+  validateInteractionId,
   listInteractions,
   getInteraction,
   upsertInteraction,
+  patchResponseSoFar,
   markSynced,
   closeDb,
 };

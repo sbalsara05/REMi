@@ -356,7 +356,7 @@ export default function Fork({
       <Ariakit.Popover
         store={popoverStore}
         gutter={10}
-        className={`glass-popover popover-animate ${isActive ? 'open' : ''} flex w-60 flex-col gap-3 overflow-hidden rounded-2xl border border-border-medium p-2 px-4 shadow-lg`}
+        className={`glass-popover remi-radius-card popover-animate ${isActive ? 'open' : ''} flex w-60 flex-col gap-3 overflow-hidden border border-border-medium p-2 px-4 shadow-lg`}
         style={{
           outline: 'none',
           pointerEvents: 'auto',

@@ -80,6 +80,34 @@ describe('handoffStore', () => {
     expect(fs.existsSync(withDataUri.screenshotPath)).toBe(true);
   });
 
+  it('rejects path traversal in interaction id when writing screenshots', () => {
+    const evilId = '../../../tmp/evil';
+    const escapeTarget = path.resolve(handoffStore.getScreenshotsDir(), `${evilId}.png`);
+    const outsideScreenshotsDir = !escapeTarget.startsWith(
+      `${path.resolve(handoffStore.getScreenshotsDir())}${path.sep}`,
+    );
+    expect(outsideScreenshotsDir).toBe(true);
+
+    expect(() =>
+      handoffStore.upsertInteraction({
+        id: evilId,
+        screenshot: ONE_BY_ONE_PNG_BASE64,
+      }),
+    ).toThrow('Invalid interactionId');
+
+    expect(fs.existsSync(escapeTarget)).toBe(false);
+  });
+
+  it('stores screenshots only inside the screenshots directory', () => {
+    const created = handoffStore.upsertInteraction({
+      id: 'safe-shot',
+      screenshot: ONE_BY_ONE_PNG_BASE64,
+    });
+    const screenshotsDir = path.resolve(handoffStore.getScreenshotsDir());
+    const resolved = path.resolve(created.screenshotPath);
+    expect(resolved.startsWith(`${screenshotsDir}${path.sep}`)).toBe(true);
+  });
+
   it('paginates interactions by created_at descending', () => {
     const base = Date.now();
     for (let i = 0; i < 3; i += 1) {

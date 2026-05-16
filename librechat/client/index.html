@@ -1,14 +1,22 @@
 <!DOCTYPE html>
-<html lang="en-US">
+<html lang="en-US" class="dark">
   <head>
     <meta charset="utf-8" />
     <base href="/" />
-    <meta name="theme-color" content="#171717" />
+    <meta name="theme-color" content="#0a0a0f" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="description" content="LibreChat - An open source chat application with support for multiple AI models" />
-    <title>LibreChat</title>
+    <meta name="description" content="REMi — dark-first glass chat with capture history and multi-model support" />
+    <meta property="og:title" content="REMi" />
+    <meta property="og:description" content="REMi — dark-first glass chat with capture history and multi-model support" />
+    <meta property="og:image" content="/assets/og-image.png" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="REMi" />
+    <meta name="twitter:description" content="REMi — dark-first glass chat with capture history and multi-model support" />
+    <meta name="twitter:image" content="/assets/og-image.png" />
+    <title>REMi</title>
     <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png" />
     <link rel="apple-touch-icon" href="assets/apple-touch-icon-180x180.png" />
@@ -22,19 +30,28 @@
       }
     </style>
     <script>
-      const theme = localStorage.getItem('color-theme');
+      const storedTheme = localStorage.getItem('color-theme');
+      const theme =
+        storedTheme === 'light' || storedTheme === 'dark' || storedTheme === 'system'
+          ? storedTheme
+          : 'dark';
+      if (!storedTheme) {
+        localStorage.setItem('color-theme', 'dark');
+      }
+      document.documentElement.classList.toggle('dark', theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches));
+
       const loadingContainerStyle = document.createElement('style');
       let backgroundColor;
 
       if (theme === 'dark') {
-        backgroundColor = '#0d0d0d';
+        backgroundColor = '#0a0a0f';
       } else if (theme === 'light') {
         backgroundColor = '#ffffff';
       } else if (theme === 'system') {
         const prefersDarkScheme = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        backgroundColor = prefersDarkScheme ? '#0d0d0d' : '#ffffff';
+        backgroundColor = prefersDarkScheme ? '#0a0a0f' : '#ffffff';
       } else {
-        backgroundColor = '#ffffff';
+        backgroundColor = '#0a0a0f';
       }
 
       loadingContainerStyle.innerHTML = `

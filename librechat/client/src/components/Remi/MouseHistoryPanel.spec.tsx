@@ -179,4 +179,108 @@ describe('MouseHistoryPanel', () => {
       expect(mockNavigate).toHaveBeenCalledWith('/c/convo-new');
     });
   });
+
+  it('renders the REMi ASCII mouse on interaction cards', () => {
+    useRemiInteractionsInfiniteQuery.mockReturnValue({
+      data: {
+        pages: [
+          {
+            interactions: [
+              {
+                id: 'glyph-1',
+                createdAt: Date.now(),
+                prompt: 'Prompt',
+                responseSoFar: null,
+                screenshotPath: null,
+                model: null,
+                cropHash: null,
+                syncedToChat: false,
+                conversationId: null,
+              },
+            ],
+            nextCursor: null,
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      fetchNextPage: mockFetchNextPage,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+    });
+
+    renderPanel();
+    expect(screen.getAllByTestId('remi-ascii-mouse').length).toBeGreaterThan(0);
+  });
+
+  it('applies preview streaming class when responseSoFar grows', async () => {
+    let responseSoFar: string | null = 'Partial';
+
+    useRemiInteractionsInfiniteQuery.mockImplementation(() => ({
+      data: {
+        pages: [
+          {
+            interactions: [
+              {
+                id: 'stream-1',
+                createdAt: Date.now(),
+                prompt: null,
+                responseSoFar,
+                screenshotPath: null,
+                model: null,
+                cropHash: null,
+                syncedToChat: false,
+                conversationId: null,
+              },
+            ],
+            nextCursor: null,
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      fetchNextPage: mockFetchNextPage,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+    }));
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <MouseHistoryPanel />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    responseSoFar = 'Partial response growing';
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <MouseHistoryPanel />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector('.remi-preview-streaming')).toBeInTheDocument();
+    });
+  });
+
+  it('shows mouse stripe divider chrome', () => {
+    useRemiInteractionsInfiniteQuery.mockReturnValue({
+      data: { pages: [{ interactions: [], nextCursor: null }] },
+      isLoading: false,
+      isError: false,
+      fetchNextPage: mockFetchNextPage,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+    });
+
+    const { container } = renderPanel();
+    expect(container.querySelector('.mouse-stripe-divider')).toBeInTheDocument();
+  });
 });

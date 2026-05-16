@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import type { TRemiInteraction } from 'librechat-data-provider';
 import { Button, Skeleton, Spinner } from '@librechat/client';
-import { CursorClick, WarningCircle } from '~/components/Icons';
+import { WarningCircle } from '@phosphor-icons/react';
+import { AsciiMouse } from '~/components/Icons';
 import {
   glassCardHover,
   glassCardVariants,
@@ -16,6 +17,7 @@ import {
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
 import RemiEmptyState from './RemiEmptyState';
+import { useRemiPreviewStreaming } from './useRemiPreviewStreaming';
 
 function formatRelativeTime(createdAt: number) {
   const diffMs = Date.now() - createdAt;
@@ -45,6 +47,7 @@ function RemiInteractionCard({
   onOpen: () => void;
 }) {
   const preview = (item.prompt || item.responseSoFar || 'Interaction').trim();
+  const isPreviewStreaming = useRemiPreviewStreaming(item.id, item.responseSoFar);
   const screenshotUrl = item.screenshotPath
     ? `/api/remi/interactions/${item.id}/screenshot`
     : null;
@@ -53,12 +56,12 @@ function RemiInteractionCard({
     <motion.article
       variants={glassCardVariants}
       whileHover={glassCardHover}
-      className="glass-card overflow-hidden rounded-2xl p-2.5"
+      className="glass-card remi-radius-card overflow-hidden p-2.5"
       style={{ '--stagger-index': index } as React.CSSProperties}
     >
       <div className="mb-2 flex items-center justify-between gap-2 text-xs text-text-secondary">
         <div className="flex items-center gap-1.5">
-          <CursorClick className="h-3.5 w-3.5 shrink-0 text-brand-purple" weight="duotone" />
+          <AsciiMouse variant="micro" size="sm" className="shrink-0 text-brand-purple" />
           <span>{formatRelativeTime(item.createdAt)}</span>
         </div>
         <span
@@ -74,7 +77,7 @@ function RemiInteractionCard({
       </div>
       {screenshotUrl && (
         <motion.div
-          className="mb-2 overflow-hidden rounded-xl border border-white/10 shadow-inner"
+          className="remi-radius-control mb-2 overflow-hidden border border-white/10 shadow-inner"
           layoutId={`remi-shot-${item.id}`}
         >
           <img
@@ -84,7 +87,14 @@ function RemiInteractionCard({
           />
         </motion.div>
       )}
-      <p className="mb-2.5 line-clamp-3 text-sm leading-snug text-text-primary">{preview}</p>
+      <p
+        className={cn(
+          'mb-2.5 line-clamp-3 text-sm leading-snug text-text-primary',
+          isPreviewStreaming && 'remi-preview-streaming',
+        )}
+      >
+        {preview}
+      </p>
       <Button
         type="button"
         size="sm"
@@ -96,6 +106,18 @@ function RemiInteractionCard({
         {item.syncedToChat ? 'Open chat' : 'Open in chat'}
       </Button>
     </motion.article>
+  );
+}
+
+function MouseHistoryChrome({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col">
+      <div className="mb-3 flex items-center gap-2 px-3 pt-2">
+        <AsciiMouse variant="peek" size="sm" className="text-brand-purple" />
+        <div className="mouse-stripe-divider min-w-0 flex-1 shrink-0" aria-hidden />
+      </div>
+      {children}
+    </div>
   );
 }
 
@@ -122,69 +144,77 @@ export default function MouseHistoryPanel() {
 
   if (isLoading) {
     return (
-      <motion.div
-        className="flex flex-col gap-2 px-3 pb-3 pt-2"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-      >
-        {[0, 1, 2].map((i) => (
-          <Skeleton key={i} className="glass-card h-36 w-full rounded-2xl" />
-        ))}
-      </motion.div>
+      <MouseHistoryChrome>
+        <motion.div
+          className="flex flex-col gap-2 px-3 pb-3 pt-0"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+        >
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="glass-card remi-radius-card h-36 w-full" />
+          ))}
+        </motion.div>
+      </MouseHistoryChrome>
     );
   }
 
   if (isError) {
     return (
-      <div className="px-3 pb-3 pt-2">
-        <div className="glass-card flex flex-col items-center gap-2 rounded-2xl p-4 text-center">
-          <WarningCircle className="size-8 text-text-destructive" weight="regular" />
-          <p className="text-sm text-text-secondary">
-            {localize('com_ui_error') ?? 'Could not load capture history.'}
-          </p>
+      <MouseHistoryChrome>
+        <div className="px-3 pb-3 pt-0">
+          <div className="glass-card remi-radius-card flex flex-col items-center gap-2 p-4 text-center">
+            <WarningCircle className="size-8 text-text-destructive" weight="regular" />
+            <p className="text-sm text-text-secondary">
+              {localize('com_ui_error') ?? 'Could not load capture history.'}
+            </p>
+          </div>
         </div>
-      </div>
+      </MouseHistoryChrome>
     );
   }
 
   if (interactions.length === 0) {
     return (
-      <div className="px-3 pb-3 pt-2">
-        <RemiEmptyState />
-      </div>
+      <MouseHistoryChrome>
+        <div className="px-3 pb-3 pt-0">
+          <RemiEmptyState />
+        </div>
+      </MouseHistoryChrome>
     );
   }
 
   return (
-    <div className="flex max-h-[70vh] flex-col px-3 pb-3 pt-2">
-      <motion.div
-        className="glass-stagger flex flex-col gap-2 overflow-y-auto"
-        variants={glassStaggerContainer}
-        initial="hidden"
-        animate="visible"
-      >
-        {interactions.map((item, index) => (
-          <RemiInteractionCard
-            key={item.id}
-            item={item}
-            index={index}
-            disabled={handoff.isLoading}
-            onOpen={() => onOpenInChat(item.id, item.conversationId)}
-          />
-        ))}
-      </motion.div>
-      {hasNextPage && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="glass-popover mt-2 w-full"
-          disabled={isFetchingNextPage}
-          onClick={() => fetchNextPage()}
+    <MouseHistoryChrome>
+      <div className="flex max-h-[70vh] flex-col px-3 pb-3 pt-0">
+        <motion.div
+          className="glass-stagger flex flex-col gap-2 overflow-y-auto"
+          variants={glassStaggerContainer}
+          initial="hidden"
+          animate="visible"
         >
-          {isFetchingNextPage ? <Spinner className="size-4" /> : 'Load more'}
-        </Button>
-      )}
-    </div>
+          {interactions.map((item, index) => (
+            <RemiInteractionCard
+              key={item.id}
+              item={item}
+              index={index}
+              disabled={handoff.isLoading}
+              onOpen={() => onOpenInChat(item.id, item.conversationId)}
+            />
+          ))}
+        </motion.div>
+        {hasNextPage && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="glass-popover remi-radius-control mt-2 w-full"
+            disabled={isFetchingNextPage}
+            onClick={() => fetchNextPage()}
+          >
+            {isFetchingNextPage ? <Spinner className="size-4" /> : 'Load more'}
+          </Button>
+        )}
+      </div>
+    </MouseHistoryChrome>
   );
 }

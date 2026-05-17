@@ -73,7 +73,7 @@ function ChatView({ index = 0 }: { index?: number }) {
   } else if (!isLandingPage) {
     content = <MessagesView messagesTree={messagesTree} />;
   } else {
-    content = <Landing centerFormOnLanding={centerFormOnLanding} />;
+    content = <Landing />;
   }
 
   return (
@@ -84,25 +84,39 @@ function ChatView({ index = 0 }: { index?: number }) {
             <div className="relative flex h-full w-full flex-col">
               <Header />
               <>
-                <div
-                  className={cn(
-                    'flex flex-col',
-                    isLandingPage
-                      ? 'flex-1 items-center justify-end sm:justify-center'
-                      : 'h-full overflow-y-auto',
-                  )}
-                >
-                  {content}
+                {isLandingPage ? (
                   <div
                     className={cn(
-                      'w-full',
-                      isLandingPage && 'max-w-3xl transition-all duration-200 xl:max-w-4xl',
+                      'flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-4 sm:px-4',
+                      centerFormOnLanding
+                        ? 'items-center justify-center gap-5 sm:gap-8'
+                        : 'gap-4 sm:gap-6',
                     )}
                   >
-                    <ChatForm index={index} />
-                    {isLandingPage ? <ConversationStarters /> : <Footer />}
+                    <div
+                      className={cn(
+                        'flex w-full max-w-3xl flex-col items-center xl:max-w-4xl',
+                        centerFormOnLanding
+                          ? 'shrink-0'
+                          : 'min-h-0 flex-1 justify-center',
+                      )}
+                    >
+                      {content}
+                    </div>
+                    <div className="w-full max-w-3xl shrink-0 transition-all duration-200 xl:max-w-4xl">
+                      <ChatForm index={index} />
+                      <ConversationStarters />
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="flex h-full flex-col overflow-y-auto">
+                    {content}
+                    <div className="w-full">
+                      <ChatForm index={index} />
+                      <Footer />
+                    </div>
+                  </div>
+                )}
                 {isLandingPage && <Footer />}
               </>
             </div>

@@ -9,6 +9,7 @@ import {
   ThumbUpIcon,
   ThumbDownIcon,
 } from '@librechat/client';
+import { RemiBorderGlow } from '~/components/BorderGlow';
 import {
   AlertCircle,
   PenTool,
@@ -163,8 +164,13 @@ function FeedbackButtons({
         gutter={8}
         portal
         unmountOnHide
-        className="glass-popover remi-radius-card popover-animate flex w-auto flex-col gap-1.5 overflow-hidden border border-border-medium p-1.5 shadow-lg"
+        className="popover-animate border-0 bg-transparent p-0 shadow-none"
       >
+        <RemiBorderGlow
+          variant="popover"
+          className="remi-radius-card"
+          innerClassName="flex flex-col gap-1.5 overflow-hidden p-1.5"
+        >
         <div className="flex flex-col items-stretch justify-center">
           {positiveTags.map((tag) => (
             <FeedbackOptionButton
@@ -175,6 +181,7 @@ function FeedbackButtons({
             />
           ))}
         </div>
+        </RemiBorderGlow>
       </Ariakit.Popover>
 
       <Ariakit.PopoverAnchor
@@ -197,8 +204,13 @@ function FeedbackButtons({
         gutter={8}
         portal
         unmountOnHide
-        className="glass-popover remi-radius-card popover-animate flex w-auto flex-col gap-1.5 overflow-hidden border border-border-medium p-1.5 shadow-lg"
+        className="popover-animate border-0 bg-transparent p-0 shadow-none"
       >
+        <RemiBorderGlow
+          variant="popover"
+          className="remi-radius-card"
+          innerClassName="flex flex-col gap-1.5 overflow-hidden p-1.5"
+        >
         <div className="flex flex-col items-stretch justify-center">
           {negativeTags.map((tag) => (
             <FeedbackOptionButton
@@ -209,6 +221,7 @@ function FeedbackButtons({
             />
           ))}
         </div>
+        </RemiBorderGlow>
       </Ariakit.Popover>
     </>
   );
@@ -314,26 +327,28 @@ export default function Feedback({
         />
       )}
       <OGDialog open={openDialog} onOpenChange={setOpenDialog}>
-        <OGDialogContent className="w-11/12 max-w-lg">
-          <OGDialogTitle className="text-token-text-primary text-lg font-semibold leading-6">
-            {localize('com_ui_feedback_more_information')}
-          </OGDialogTitle>
-          <textarea
-            className="w-full rounded-xl border border-border-light bg-transparent p-2 text-text-primary"
-            value={feedback?.text || ''}
-            onChange={handleTextChange}
-            rows={4}
-            placeholder={localize('com_ui_feedback_placeholder')}
-            maxLength={500}
-          />
-          <div className="mt-4 flex items-end justify-end gap-2">
-            <Button variant="destructive" onClick={handleDialogClear}>
-              {localize('com_ui_delete')}
-            </Button>
-            <Button variant="submit" onClick={handleDialogSave} disabled={!feedback?.text?.trim()}>
-              {localize('com_ui_save')}
-            </Button>
-          </div>
+        <OGDialogContent className="w-11/12 max-w-lg border-0 bg-transparent p-0 shadow-none">
+          <RemiBorderGlow variant="modal" className="w-full" innerClassName="p-4">
+            <OGDialogTitle className="text-token-text-primary text-lg font-semibold leading-6">
+              {localize('com_ui_feedback_more_information')}
+            </OGDialogTitle>
+            <textarea
+              className="mt-3 w-full rounded-xl border border-border-light bg-transparent p-2 text-text-primary"
+              value={feedback?.text || ''}
+              onChange={handleTextChange}
+              rows={4}
+              placeholder={localize('com_ui_feedback_placeholder')}
+              maxLength={500}
+            />
+            <div className="mt-4 flex items-end justify-end gap-2">
+              <Button variant="destructive" onClick={handleDialogClear}>
+                {localize('com_ui_delete')}
+              </Button>
+              <Button variant="submit" onClick={handleDialogSave} disabled={!feedback?.text?.trim()}>
+                {localize('com_ui_save')}
+              </Button>
+            </div>
+          </RemiBorderGlow>
         </OGDialogContent>
       </OGDialog>
     </>

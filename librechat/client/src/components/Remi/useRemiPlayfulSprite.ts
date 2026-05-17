@@ -3,35 +3,38 @@ import type { MouseSpriteClip } from '~/components/Icons/mouseSpriteCatalog';
 import { clipAnimationDurationMs } from '~/components/Icons/mouseSpriteCatalog';
 import {
   ACTION_CLIPS,
+  CLICK_SURPRISE_WEIGHTS,
   EXCITED_CLIPS,
   IDLE_CLIPS,
-  PLAYFUL_CLIPS,
   attackClipForCorner,
   idleClipForCorner,
   pickRandomClip,
+  pickWeightedClip,
   randomIntBetween,
   type SpriteFacingCorner,
 } from './mouseSpritePools';
+import {
+  COMPANION_MOUNT,
+  DOUBLE_CLICK_CHAIN,
+  HERO_MOUNT,
+  playSpriteSequence,
+  type SequenceController,
+} from './spriteSequences';
 
 export type PlayfulSpriteProfile = 'hero' | 'companion';
-
-const HERO_IDLE: readonly MouseSpriteClip[] = ['idleFront'];
-const HERO_ACTION: readonly MouseSpriteClip[] = ['walkFront', 'walkSide', 'dashSide'];
 
 const PROFILE = {
   hero: {
     scale: 3.25,
-    idleMs: { min: 2200, max: 5500 },
-    actionMs: { min: 4000, max: 9000 },
-    actionChance: 0.55,
-    surprisePool: HERO_ACTION,
+    idleMs: { min: 4000, max: 9000 },
+    actionMs: { min: 12000, max: 24000 },
+    actionChance: 0.25,
   },
   companion: {
     scale: 1.65,
-    idleMs: { min: 2800, max: 6500 },
-    actionMs: { min: 6000, max: 14000 },
-    actionChance: 0.55,
-    surprisePool: EXCITED_CLIPS,
+    idleMs: { min: 4000, max: 9000 },
+    actionMs: { min: 14000, max: 28000 },
+    actionChance: 0.2,
   },
 } as const;
 
@@ -66,13 +69,14 @@ export function useRemiPlayfulSprite(
   const prefersReducedMotion = usePrefersReducedMotion();
   const active = enabled && !prefersReducedMotion;
 
-  const [clip, setClip] = useState<MouseSpriteClip>('idleFront');
+  const [clip, setClip] = useState<MouseSpriteClip>('idle');
   const [playing, setPlaying] = useState(true);
   const [loop, setLoop] = useState(true);
   const [pop, setPop] = useState(false);
 
   const clipRef = useRef(clip);
   const oneShotTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sequenceRef = useRef<SequenceController | null>(null);
   const popTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastHoverRef = useRef(0);
 
@@ -83,6 +87,11 @@ export function useRemiPlayfulSprite(
       clearTimeout(oneShotTimeoutRef.current);
       oneShotTimeoutRef.current = null;
     }
+  }, []);
+
+  const cancelSequence = useCallback(() => {
+    sequenceRef.current?.cancel();
+    sequenceRef.current = null;
   }, []);
 
   const triggerPop = useCallback(() => {
@@ -97,30 +106,29 @@ export function useRemiPlayfulSprite(
   }, []);
 
   const idlePool = useMemo(() => {
-    if (profile === 'hero') {
-      return HERO_IDLE;
-    }
     if (context?.corner != null) {
       return [idleClipForCorner(context.corner)] as const;
     }
     return IDLE_CLIPS;
-  }, [profile, context?.corner]);
+  }, [context?.corner]);
 
-  const actionPool = profile === 'hero' ? HERO_ACTION : ACTION_CLIPS;
+  const actionPool = ACTION_CLIPS;
 
   const goIdle = useCallback(
     (exclude?: MouseSpriteClip) => {
       clearOneShotTimeout();
+      cancelSequence();
       setLoop(true);
       setPlaying(true);
       setClip(pickRandomClip(idlePool, exclude));
     },
-    [clearOneShotTimeout, idlePool],
+    [clearOneShotTimeout, cancelSequence, idlePool],
   );
 
   const playClip = useCallback(
     (next: MouseSpriteClip, oneShot: boolean) => {
       clearOneShotTimeout();
+      cancelSequence();
       setClip(next);
       setPlaying(true);
       setLoop(!oneShot);
@@ -133,7 +141,16 @@ export function useRemiPlayfulSprite(
         }, ms);
       }
     },
-    [clearOneShotTimeout, goIdle],
+    [clearOneShotTimeout, cancelSequence, goIdle],
+  );
+
+  const playSequence = useCallback(
+    (steps: Parameters<typeof playSpriteSequence>[0], onDone?: () => void) => {
+      clearOneShotTimeout();
+      cancelSequence();
+      sequenceRef.current = playSpriteSequence(steps, playClip, onDone);
+    },
+    [clearOneShotTimeout, cancelSequence, playClip],
   );
 
   const surprise = useCallback(() => {
@@ -144,9 +161,9 @@ export function useRemiPlayfulSprite(
     const next =
       context?.corner != null
         ? attackClipForCorner(context.corner)
-        : pickRandomClip(cfg.surprisePool, clipRef.current);
+        : pickWeightedClip(CLICK_SURPRISE_WEIGHTS, clipRef.current);
     playClip(next, true);
-  }, [active, cfg.surprisePool, context?.corner, playClip, triggerPop]);
+  }, [active, context?.corner, playClip, triggerPop]);
 
   const handleClick = useCallback(() => {
     surprise();
@@ -157,11 +174,8 @@ export function useRemiPlayfulSprite(
       return;
     }
     triggerPop();
-    playClip(pickRandomClip(EXCITED_CLIPS, clipRef.current), true);
-    setTimeout(() => {
-      playClip(pickRandomClip(ACTION_CLIPS, clipRef.current), true);
-    }, clipAnimationDurationMs(clipRef.current) + 80);
-  }, [active, playClip, triggerPop]);
+    playSequence(DOUBLE_CLICK_CHAIN);
+  }, [active, playSequence, triggerPop]);
 
   const handlePointerEnter = useCallback(() => {
     if (!active) {
@@ -172,9 +186,7 @@ export function useRemiPlayfulSprite(
       return;
     }
     lastHoverRef.current = now;
-    if (Math.random() < 0.65) {
-      playClip(pickRandomClip([...IDLE_CLIPS, 'powerFront'] as const, clipRef.current), true);
-    }
+    playClip('lookUp', true);
   }, [active, playClip]);
 
   const handleAnimationEnd = useCallback(() => {
@@ -195,17 +207,18 @@ export function useRemiPlayfulSprite(
   useEffect(() => {
     if (!active) {
       clearOneShotTimeout();
+      cancelSequence();
       setPlaying(false);
-      setClip('idleFront');
+      setClip('idle');
       setLoop(true);
       return;
     }
     if (profile === 'hero') {
-      playClip('walkFront', true);
+      playSequence(HERO_MOUNT);
     } else {
-      playClip(pickRandomClip(PLAYFUL_CLIPS), false);
+      playSequence(COMPANION_MOUNT);
     }
-  }, [active, clearOneShotTimeout, playClip, profile]);
+  }, [active, clearOneShotTimeout, cancelSequence, playSequence, profile]);
 
   useEffect(() => {
     if (!active) {
@@ -217,7 +230,9 @@ export function useRemiPlayfulSprite(
     const scheduleIdle = () => {
       const delay = randomIntBetween(cfg.idleMs.min, cfg.idleMs.max);
       timeoutId = setTimeout(() => {
-        goIdle(clipRef.current);
+        if (clipRef.current !== 'idle' && clipRef.current !== 'idleFront') {
+          goIdle(clipRef.current);
+        }
         scheduleIdle();
       }, delay);
     };
@@ -250,11 +265,12 @@ export function useRemiPlayfulSprite(
   useEffect(
     () => () => {
       clearOneShotTimeout();
+      cancelSequence();
       if (popTimeoutRef.current) {
         clearTimeout(popTimeoutRef.current);
       }
     },
-    [clearOneShotTimeout],
+    [clearOneShotTimeout, cancelSequence],
   );
 
   return {
@@ -264,6 +280,9 @@ export function useRemiPlayfulSprite(
     scale: cfg.scale,
     pop,
     playClip: playClipExternal,
+    playSequence,
+    cancelSequence,
+    goIdle,
     handleClick,
     handleDoubleClick,
     handlePointerEnter,

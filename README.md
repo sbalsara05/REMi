@@ -41,8 +41,9 @@ cd ..
 | `env.local` | Your secrets and settings (gitignored) |
 | `config/librechat.yaml` | OpenRouter endpoint + REMi UI flags |
 | `config/docker-compose.remi.yaml` | Mounts env, config, and handoff SQLite dir into API |
-| `docs/remi-handoff.md` | Mouse layer ↔ LibreChat integration contract |
-| `docs/design.md` | REMi brand system (ASCII mice, glass, meta, motion) |
+| `docs/remi-handoff.md` | MagicPointer ↔ LibreChat integration contract |
+| `docs/design.md` | REMi brand system (sprites, glass, meta, motion) |
+| `docs/parallel-contracts-remi.md` | Parallel workstream boundaries |
 
 Default models: `openai/gpt-4o-mini`, `anthropic/claude-sonnet-4`, `google/gemini-2.5-flash-preview`. With `fetch: true`, the full OpenRouter catalog loads at runtime.
 
@@ -53,6 +54,11 @@ REMi-specific LibreChat code lives under:
 - `librechat/api/server/routes/remi/`
 - `librechat/api/server/services/remi/`
 - `librechat/client/src/components/Remi/`
+
+macOS overlay (MagicPointer):
+
+- `UI/` — Swift sources (`MagicPointer.swift`, `RemiSpriteView.swift`)
+- `MagicPointer.xcodeproj` — builds `MagicPointer.app`
 
 To publish as a proper fork: push `librechat/` to `REMi-LibreChat` on GitHub (`remi` branch) and replace the directory with a git submodule.
 
@@ -74,11 +80,21 @@ Docker for data services, native Node for hot reload (REMi routes work without r
 ./scripts/dev-mac.sh        # MongoDB, Meilisearch, vectordb, rag_api (Docker)
 cd librechat
 npm run build:client        # first time only — creates client/dist
-npm run backend:dev         # terminal 1 — or from repo root: ./scripts/backend-dev.sh
-npm run frontend:dev        # terminal 2 → http://localhost:3090
+npm run backend:dev         # terminal 1 — API @ http://localhost:3080
+npm run frontend:dev        # terminal 2 — Vite @ http://localhost:3090
 ```
 
 Scripts link `librechat/.env` → `../env.local` and copy `config/librechat.yaml` into `librechat/`. Set `RAG_OPENAI_API_KEY` in `env.local` (same OpenRouter key) if you use file uploads in dev.
+
+### macOS overlay dev
+
+```bash
+chmod +x scripts/dev-watch.sh scripts/sync-mouse-spritesheet.sh
+./scripts/sync-mouse-spritesheet.sh   # web spritesheet → UI/Resources/
+./scripts/dev-watch.sh              # rebuild MagicPointer on UI/*.swift changes
+```
+
+After updating `librechat/client/public/assets/mouse-spritesheet.png`, run the sync script before testing the overlay.
 
 ## Tests
 
@@ -92,8 +108,8 @@ chmod +x scripts/test-remi.sh
 Or run suites individually from `librechat/`:
 
 ```bash
-cd api && npx jest --ci server/services/remi/handoffStore.spec.js server/services/remi/handoffService.spec.js server/routes/__tests__/remi.spec.js
-cd client && npx jest --ci src/components/Remi/MouseHistoryPanel.spec.tsx
+cd api && npx jest --ci server/services/remi/handoffStore.spec.js server/services/remi/handoffService.spec.js server/services/remi/inferenceService.spec.js server/services/remi/queryHandler.spec.js server/services/remi/deviceAuthService.spec.js server/routes/__tests__/remi.spec.js
+cd client && npx jest --ci src/components/Remi/MouseHistoryPanel.spec.tsx src/components/Remi/RemiCompanion.spec.tsx src/components/Remi/mouseSpritePools.spec.ts src/components/Icons/mouseSpriteCatalog.spec.ts src/components/Icons/mouseVariant.spec.ts
 cd packages/data-provider && npx jest --ci specs/remi-endpoints.spec.ts
 ```
 
@@ -103,6 +119,7 @@ Coverage map (see [docs/remi-handoff-test-prd.md](docs/remi-handoff-test-prd.md)
 |------|----------|
 | SQLite store | `api/server/services/remi/handoffStore.spec.js` |
 | Handoff → chat | `api/server/services/remi/handoffService.spec.js` |
+| Inference / query / device auth | `api/server/services/remi/*.spec.js` |
 | `/api/remi/*` routes | `api/server/routes/__tests__/remi.spec.js` |
 | Mouse History UI | `client/src/components/Remi/MouseHistoryPanel.spec.tsx` |
 | API URL builders | `packages/data-provider/specs/remi-endpoints.spec.ts` |
@@ -111,4 +128,4 @@ First-time setup: from `librechat/`, run `npm run smart-reinstall` (workspace de
 
 ## Mouse layer
 
-See [docs/remi-handoff.md](docs/remi-handoff.md) for the SQLite schema and `/api/remi/*` endpoints the Swift overlay branch should use.
+See [docs/remi-handoff.md](docs/remi-handoff.md) for the SQLite schema and `/api/remi/*` endpoints MagicPointer uses.

@@ -3,6 +3,7 @@ import { TStartupConfig } from 'librechat-data-provider';
 import { ErrorMessage } from '~/components/Auth/ErrorMessage';
 import RemiPlayfulMouse from '~/components/Remi/RemiPlayfulMouse';
 import RemiAmbient from '~/components/Glass/RemiAmbient';
+import { RemiBorderGlow } from '~/components/BorderGlow';
 import { TranslationKeys, useLocalize } from '~/hooks';
 import SocialLoginRender from './SocialLoginRender';
 import { BlinkAnimation } from './BlinkAnimation';
@@ -63,25 +64,31 @@ function AuthLayout({
 
   return (
     <div className="relative flex min-h-screen flex-col bg-[#0a0a0f] text-text-primary">
-      <RemiAmbient />
+      <RemiAmbient backdrop />
       <Banner />
-      <BlinkAnimation active={isFetching}>
-        <div className="relative z-[1] mt-8 flex flex-col items-center gap-2">
-          <RemiPlayfulMouse
-            profile="hero"
-            title={localize('com_ui_logo', { 0: appTitle })}
-            className="scale-75 sm:scale-90"
-          />
-          <span className="text-sm font-semibold tracking-[0.2em] text-text-primary">{appTitle}</span>
-        </div>
-      </BlinkAnimation>
       <DisplayError />
       <div className="absolute bottom-0 left-0 z-[1] md:m-4">
         <ThemeSelector />
       </div>
 
-      <main className="relative z-[1] flex flex-grow items-center justify-center px-4">
-        <div className="glass-modal remi-radius-card w-authPageWidth overflow-hidden px-6 py-4 sm:max-w-md">
+      <main className="relative z-[1] flex flex-grow flex-col items-center justify-center px-4">
+        <BlinkAnimation active={isFetching}>
+          <div className="mb-3 flex flex-col items-center gap-2 sm:mb-4">
+            <RemiPlayfulMouse
+              profile="hero"
+              title={localize('com_ui_logo', { 0: appTitle })}
+              className="scale-75 sm:scale-90"
+            />
+            <span className="font-sans text-3xl font-semibold tracking-[0.14em] text-text-primary sm:text-4xl">
+              {appTitle}
+            </span>
+          </div>
+        </BlinkAnimation>
+        <RemiBorderGlow
+          variant="modal"
+          className="remi-radius-card w-authPageWidth sm:max-w-md"
+          innerClassName="overflow-hidden px-6 py-4"
+        >
           {!hasStartupConfigError && !isFetching && header && (
             <h1
               className="mb-4 text-center text-3xl font-semibold text-text-primary"
@@ -95,7 +102,7 @@ function AuthLayout({
             (pathname.includes('login') || pathname.includes('register')) && (
               <SocialLoginRender startupConfig={startupConfig} />
             )}
-        </div>
+        </RemiBorderGlow>
       </main>
       <Footer startupConfig={startupConfig} />
     </div>

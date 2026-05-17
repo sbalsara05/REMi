@@ -1,20 +1,48 @@
 /**
  * REMi mouse spritesheet clip catalog.
- * Sheet: 192×432px, 4×12 grid, 48×36px cells.
- * Viewports derived from per-cell content bounds (avoids cropping VFX / empty padding).
+ * Asset: Foozle Critters Mouse (_Main Player Spritesheet), CC0.
+ * Sheet: 960×624px, 15×13 grid, 64×48px cells (side-view platformer).
+ *
+ * Per-frame labels and viewports: mouseSpriteFrameCatalog.ts
+ * UI `idle` = double_jump.dj_stand (row 3 col 0) — not Foozle “Player Idle” (row 0 lunge bob).
  */
+
+import {
+  getSheetRowFrames,
+  type FrameViewport,
+  type SheetFrameLabel,
+} from './mouseSpriteFrameCatalog';
 
 const baseUrl = (import.meta.env.BASE_URL ?? '/').replace(/\/?$/, '/');
 
 export const SPRITE = {
   url: `${baseUrl}assets/mouse-spritesheet.png`,
-  cols: 4,
-  rows: 12,
-  frameW: 48,
-  frameH: 36,
+  cols: 15,
+  rows: 13,
+  frameW: 64,
+  frameH: 48,
 } as const;
 
-export type MouseSpriteClip =
+/** @deprecated Use FrameViewport from mouseSpriteFrameCatalog */
+export type ClipViewport = FrameViewport;
+
+/** Primary semantic clips mapped to Foozle sheet rows. */
+export type SemanticMouseClip =
+  | 'idle'
+  | 'run'
+  | 'jump'
+  | 'fall'
+  | 'land'
+  | 'slide'
+  | 'lookUp'
+  | 'hurt'
+  | 'slash'
+  | 'thrust'
+  | 'heavy'
+  | 'combo';
+
+/** Legacy names kept for existing call sites. */
+export type LegacyMouseClip =
   | 'walkSide'
   | 'walkFront'
   | 'walkBack'
@@ -28,62 +56,122 @@ export type MouseSpriteClip =
   | 'idleSide'
   | 'idleBack';
 
-/** Visible region inside each 48×36 cell (source pixels). */
-export type ClipViewport = {
-  w: number;
-  h: number;
-  ox: number;
-  oy: number;
-};
+export type MouseSpriteClip = SemanticMouseClip | LegacyMouseClip;
 
 export type MouseSpriteClipDef = {
   row: number;
+  /** Total frames in the source row (for docs); animation uses frameCount when set. */
   frames: number;
+  frameStart?: number;
+  frameCount?: number;
   fps?: number;
   loop?: boolean;
-  viewport: ClipViewport;
 };
 
-/** Per-row viewports from sheet alpha bounds (+1px pad). */
-export const MOUSE_SPRITE_CLIPS: Record<MouseSpriteClip, MouseSpriteClipDef> = {
-  walkSide: { row: 0, frames: 4, fps: 8, viewport: { w: 24, h: 20, ox: 8, oy: 13 } },
-  walkFront: { row: 1, frames: 4, fps: 8, viewport: { w: 18, h: 20, ox: 15, oy: 9 } },
-  walkBack: { row: 2, frames: 4, fps: 8, viewport: { w: 18, h: 20, ox: 15, oy: 5 } },
-  dashSide: { row: 3, frames: 4, fps: 10, viewport: { w: 48, h: 36, ox: 0, oy: 0 } },
-  powerFront: { row: 4, frames: 4, fps: 8, viewport: { w: 20, h: 36, ox: 14, oy: 0 } },
-  powerBack: { row: 5, frames: 4, fps: 8, viewport: { w: 19, h: 22, ox: 14, oy: 0 } },
-  attackSide: { row: 6, frames: 4, fps: 10, viewport: { w: 48, h: 20, ox: 5, oy: 5 } },
-  attackFront: { row: 7, frames: 4, fps: 10, viewport: { w: 21, h: 31, ox: 13, oy: 0 } },
-  attackBack: { row: 8, frames: 4, fps: 10, viewport: { w: 21, h: 29, ox: 13, oy: 5 } },
-  idleFront: { row: 9, frames: 2, fps: 4, viewport: { w: 18, h: 10, ox: 15, oy: 26 } },
-  idleSide: { row: 10, frames: 2, fps: 4, viewport: { w: 20, h: 28, ox: 12, oy: 7 } },
-  idleBack: { row: 11, frames: 2, fps: 4, viewport: { w: 21, h: 28, ox: 12, oy: 7 } },
+const CLIP_DEFS: Record<SemanticMouseClip, MouseSpriteClipDef> = {
+  /** double_jump.dj_stand — upright, single frame (no sheet-step blink). */
+  idle: { row: 3, frames: 8, frameStart: 0, frameCount: 1, fps: 4 },
+  run: { row: 1, frames: 8, fps: 11 },
+  jump: { row: 2, frames: 6, fps: 12 },
+  fall: { row: 3, frames: 8, fps: 10 },
+  /** jump.jump_4 — crouch / settle */
+  land: { row: 2, frames: 6, frameStart: 4, frameCount: 1, fps: 10 },
+  slide: { row: 4, frames: 4, fps: 12 },
+  /** jump.jump_0 — anticipation; no look-up strip in pack */
+  lookUp: { row: 2, frames: 6, frameStart: 0, frameCount: 1, fps: 8 },
+  hurt: { row: 11, frames: 4, fps: 10 },
+  slash: { row: 7, frames: 10, fps: 12 },
+  thrust: { row: 8, frames: 5, fps: 12 },
+  heavy: { row: 9, frames: 7, fps: 10 },
+  combo: { row: 10, frames: 7, fps: 12 },
 };
 
-/** Clips with effects that extend outside the tight viewport. */
+const LEGACY_ALIASES: Record<LegacyMouseClip, SemanticMouseClip> = {
+  idleFront: 'idle',
+  idleSide: 'idle',
+  idleBack: 'idle',
+  walkSide: 'idle',
+  walkFront: 'idle',
+  walkBack: 'idle',
+  dashSide: 'slide',
+  powerFront: 'heavy',
+  powerBack: 'fall',
+  attackSide: 'slash',
+  attackFront: 'thrust',
+  attackBack: 'combo',
+};
+
+export const IDLE_LIKE_CLIPS: ReadonlySet<MouseSpriteClip> = new Set([
+  'idle',
+  'idleFront',
+  'idleSide',
+  'idleBack',
+  'walkSide',
+  'walkFront',
+  'walkBack',
+]);
+
+/** Clips with VFX that extend outside the tight viewport. */
 export const CLIPS_WITH_BLEED: ReadonlySet<MouseSpriteClip> = new Set([
+  'slide',
   'dashSide',
+  'fall',
+  'heavy',
   'powerFront',
   'powerBack',
+  'slash',
+  'thrust',
+  'combo',
   'attackSide',
   'attackFront',
   'attackBack',
 ]);
 
+export function resolveSemanticClip(clip: MouseSpriteClip): SemanticMouseClip {
+  if (clip in CLIP_DEFS) {
+    return clip as SemanticMouseClip;
+  }
+  return LEGACY_ALIASES[clip as LegacyMouseClip];
+}
+
 export function clipAllowsBleed(clip: MouseSpriteClip): boolean {
   return CLIPS_WITH_BLEED.has(clip);
 }
 
+export function isIdleLikeClip(clip: MouseSpriteClip): boolean {
+  return IDLE_LIKE_CLIPS.has(clip);
+}
+
 export const DEFAULT_SPRITE_FPS = 8;
 
-export const ALL_SPRITE_CLIPS = Object.keys(MOUSE_SPRITE_CLIPS) as MouseSpriteClip[];
+export const ALL_SPRITE_CLIPS = [
+  ...Object.keys(CLIP_DEFS),
+  ...Object.keys(LEGACY_ALIASES),
+] as MouseSpriteClip[];
 
 export function getClipDef(clip: MouseSpriteClip): MouseSpriteClipDef {
-  return MOUSE_SPRITE_CLIPS[clip];
+  return CLIP_DEFS[resolveSemanticClip(clip)];
 }
 
 export function getClipFps(clip: MouseSpriteClip): number {
-  return MOUSE_SPRITE_CLIPS[clip].fps ?? DEFAULT_SPRITE_FPS;
+  return getClipDef(clip).fps ?? DEFAULT_SPRITE_FPS;
+}
+
+export function getClipFrameRange(clip: MouseSpriteClip): {
+  start: number;
+  count: number;
+} {
+  const def = getClipDef(clip);
+  const start = def.frameStart ?? 0;
+  const count = def.frameCount ?? def.frames;
+  return { start, count };
+}
+
+/** Resolved sheet frames for a clip (per-frame viewport from frame catalog). */
+export function getClipFrames(clip: MouseSpriteClip): SheetFrameLabel[] {
+  const def = getClipDef(clip);
+  const { start, count } = getClipFrameRange(clip);
+  return getSheetRowFrames(def.row).filter((f) => f.col >= start && f.col < start + count);
 }
 
 const px = (n: number) => Math.round(n);
@@ -96,48 +184,76 @@ export function clipBackgroundSize(scale: number): { w: number; h: number } {
 }
 
 export function clipFrameSize(clip: MouseSpriteClip, scale: number): { w: number; h: number } {
-  const { viewport } = getClipDef(clip);
-  return {
-    w: px(viewport.w * scale),
-    h: px(viewport.h * scale),
-  };
+  const frames = getClipFrames(clip);
+  const w = Math.max(...frames.map((f) => f.viewport.w), 1);
+  const h = Math.max(...frames.map((f) => f.viewport.h), 1);
+  return { w: px(w * scale), h: px(h * scale) };
 }
 
-/** Background position for a single frame (top-left of viewport in scaled sheet space). */
+/** Background position for a frame index within the clip (0-based). */
 export function clipBackgroundPosition(
   clip: MouseSpriteClip,
   frameIndex: number,
   scale: number,
 ): string {
-  const { row, viewport } = getClipDef(clip);
-  const x = px(-(frameIndex * SPRITE.frameW + viewport.ox) * scale);
-  const y = px(-(row * SPRITE.frameH + viewport.oy) * scale);
+  const def = getClipDef(clip);
+  const frames = getClipFrames(clip);
+  const fr = frames[frameIndex] ?? frames[0];
+  if (!fr) {
+    return '0px 0px';
+  }
+  const x = px(-(fr.col * SPRITE.frameW + fr.viewport.ox) * scale);
+  const y = px(-(def.row * SPRITE.frameH + fr.viewport.oy) * scale);
   return `${x}px ${y}px`;
 }
 
 export function clipAnimationDuration(clip: MouseSpriteClip): string {
-  const { frames } = getClipDef(clip);
+  const { count } = getClipFrameRange(clip);
   const fps = getClipFps(clip);
-  return `${frames / fps}s`;
+  return `${count / fps}s`;
 }
 
 export function clipAnimationDurationMs(clip: MouseSpriteClip): number {
-  const { frames } = getClipDef(clip);
+  const { count } = getClipFrameRange(clip);
   const fps = getClipFps(clip);
-  return (frames / fps) * 1000;
+  return (count / fps) * 1000;
 }
 
-/** Keyframe endpoints — steps(n) shows n frames, so end at (frames - 1). */
+/** Discrete per-frame keyframes (avoids steps() + mismatched shared viewport blink). */
+export function clipKeyframeCss(animName: string, clip: MouseSpriteClip, scale: number): string {
+  const frames = getClipFrames(clip);
+  const n = frames.length;
+  const pos0 = clipBackgroundPosition(clip, 0, scale);
+
+  if (n <= 1) {
+    return `@keyframes ${animName}{from,to{background-position:${pos0}}}`;
+  }
+
+  const stops: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const startPct = (i / n) * 100;
+    const endPct = i === n - 1 ? 100 : ((i + 1) / n) * 100 - 0.001;
+    const pos = clipBackgroundPosition(clip, i, scale);
+    stops.push(`${startPct}%{background-position:${pos}}`);
+    stops.push(`${endPct}%{background-position:${pos}}`);
+  }
+  return `@keyframes ${animName}{${stops.join('')}}`;
+}
+
+/** @deprecated Prefer clipKeyframeCss; kept for tests. */
 export function clipAnimationPositions(
   clip: MouseSpriteClip,
   scale: number,
 ): { from: string; to: string } {
-  const { row, frames, viewport } = getClipDef(clip);
-  const frameW = px(SPRITE.frameW * scale);
-  const frameH = px(SPRITE.frameH * scale);
-  const y = px(-(row * frameH + viewport.oy * scale));
+  const frames = getClipFrames(clip);
+  const n = frames.length;
   return {
-    from: `${px(-viewport.ox * scale)}px ${y}px`,
-    to: `${px(-((frames - 1) * frameW + viewport.ox * scale))}px ${y}px`,
+    from: clipBackgroundPosition(clip, 0, scale),
+    to: clipBackgroundPosition(clip, Math.max(0, n - 1), scale),
   };
 }
+
+/** @deprecated Use getClipDef; kept for tests referencing keys. */
+export const MOUSE_SPRITE_CLIPS = Object.fromEntries(
+  ALL_SPRITE_CLIPS.map((clip) => [clip, getClipDef(clip)]),
+) as Record<MouseSpriteClip, MouseSpriteClipDef>;

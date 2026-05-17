@@ -5,6 +5,7 @@ import App from './App';
 import './style.css';
 import './mobile.css';
 import { ApiErrorBoundaryProvider } from './hooks/ApiErrorBoundaryContext';
+import { dismissBootSplash } from './utils/dismissBootSplash';
 import 'katex/dist/katex.min.css';
 import 'katex/dist/contrib/copy-tex.js';
 
@@ -16,3 +17,7 @@ root.render(
     <App />
   </ApiErrorBoundaryProvider>,
 );
+
+requestAnimationFrame(() => {
+  dismissBootSplash();
+});

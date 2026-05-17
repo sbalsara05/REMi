@@ -48,13 +48,6 @@ export const ShellIcons = {
 
 export { default as RemiMouse } from './RemiMouse';
 export { default as RemiSprite } from './RemiSprite';
-export { default as AsciiMouse } from './AsciiMouse';
-export {
-  ASCII_MOUSE_CATALOG,
-  ASCII_STREAM_CARET,
-  ASCII_STREAM_PREVIEW,
-  ASCII_THINKING,
-} from './asciiMouseCatalog';
 export {
   MOUSE_SPRITE_CLIPS,
   SPRITE,

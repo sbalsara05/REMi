@@ -30,7 +30,13 @@ describe('handoffService', () => {
 
     db.saveMessage.mockImplementation(async (_ctx, payload) => payload);
     db.saveConvo.mockResolvedValue(undefined);
-    uploadImageBuffer.mockResolvedValue({ filepath: '/files/screenshot.png' });
+    uploadImageBuffer.mockResolvedValue({
+      file_id: 'file-shot-1',
+      filepath: '/files/screenshot.png',
+      filename: 'screenshot.png',
+      width: 64,
+      height: 64,
+    });
   });
 
   afterEach(() => {
@@ -69,6 +75,34 @@ describe('handoffService', () => {
     const row = handoffStore.getInteraction('handoff-new');
     expect(row.syncedToChat).toBe(true);
     expect(row.conversationId).toBe(result.conversationId);
+  });
+
+  it('attaches screenshot as IMAGE_FILE content when a screenshot exists', async () => {
+    const { ContentTypes } = require('librechat-data-provider');
+    const screenshotPath = handoffStore.upsertInteraction({
+      id: 'handoff-shot',
+      prompt: 'What is this?',
+      screenshot: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==',
+    }).screenshotPath;
+
+    expect(screenshotPath).toBeTruthy();
+
+    await handoffService.handoffInteraction(req, 'handoff-shot');
+
+    const userSave = db.saveMessage.mock.calls.find(
+      ([, payload]) => payload.isCreatedByUser === true,
+    );
+    expect(userSave).toBeDefined();
+    const imagePart = userSave[1].content?.find((part) => part.type === ContentTypes.IMAGE_FILE);
+    expect(imagePart).toEqual(
+      expect.objectContaining({
+        type: ContentTypes.IMAGE_FILE,
+        [ContentTypes.IMAGE_FILE]: expect.objectContaining({
+          file_id: 'file-shot-1',
+          filepath: '/files/screenshot.png',
+        }),
+      }),
+    );
   });
 
   it('returns alreadySynced without creating a new conversation', async () => {

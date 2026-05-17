@@ -1,0 +1,33 @@
+.remi-border-glow.border-glow-card {
+  background: rgb(var(--rgb-surface-primary-alt) / 0.45);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-color: var(--glass-border-light, rgb(255 255 255 / 15%));
+  box-shadow: var(--glass-shadow), var(--glass-inset);
+}
+
+.remi-border-glow--modal.border-glow-card {
+  background: rgb(var(--rgb-surface-primary-alt) / 0.72);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+}
+
+.remi-border-glow--composer.border-glow-card {
+  background: rgb(var(--rgb-surface-primary-alt) / 0.55);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+.remi-border-glow--popover.border-glow-card {
+  background: rgb(var(--rgb-surface-primary-alt) / 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.remi-border-glow .border-glow-inner {
+  min-width: 0;
+}
+
+.remi-border-glow--composer .border-glow-inner {
+  overflow: hidden;
+}

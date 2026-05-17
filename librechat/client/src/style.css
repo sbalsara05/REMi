@@ -2015,27 +2015,6 @@ html {
     transform: scale3d(1.25, 1.25, 1);
   }
 }
-.submitting .result-thinking:empty:last-child:after {
-  -webkit-font-smoothing: subpixel-antialiased;
-  -webkit-backface-visibility: hidden;
-  backface-visibility: hidden;
-  box-sizing: border-box;
-  content: var(--remi-thinking-caret);
-  display: block;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.7rem;
-  line-height: 1;
-  color: var(--text-primary);
-  position: absolute;
-  top: -11px;
-  -webkit-animation: remi-thinking-pulse var(--remi-thinking-pulse-duration, 1.8s) ease-in-out
-    infinite;
-  animation: remi-thinking-pulse var(--remi-thinking-pulse-duration, 1.8s) ease-in-out infinite;
-  -webkit-transform: translateZ(0);
-  transform: translateZ(0);
-  will-change: transform, opacity;
-}
-
 .shadow-stroke {
   position: relative;
 }
@@ -2135,24 +2114,7 @@ html {
   }
 }
 
-.remi-ascii-stream-caret,
-.result-streaming > :not(ol):not(ul):not(pre):last-child:after,
-.result-streaming > pre:last-child code:after {
-  content: var(--remi-stream-caret);
-  display: inline-block;
-  width: auto;
-  height: auto;
-  margin-left: 0.25rem;
-  vertical-align: middle;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.65rem;
-  line-height: 1;
-  letter-spacing: -0.02em;
-  color: currentColor;
-  background: none;
-  -webkit-animation: remi-stream-pulse var(--remi-stream-pulse-duration) ease-in-out infinite;
-  animation: remi-stream-pulse var(--remi-stream-pulse-duration) ease-in-out infinite;
-}
+/* Stream caret sprites: remiStreamCaretCss.ts (injected via RemiStreamCaretStyleTag) */
 
 .result-streaming > :not(ol):not(ul):not(pre):last-child,
 .result-streaming > pre:last-child code {
@@ -2164,58 +2126,7 @@ html {
   animation: remi-preview-highlight 0.6s ease-out;
 }
 
-.remi-preview-streaming::after {
-  content: var(--remi-stream-preview-caret);
-  display: inline-block;
-  width: auto;
-  height: auto;
-  margin-left: 0.2rem;
-  vertical-align: middle;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.6rem;
-  line-height: 1;
-  color: currentColor;
-  background: none;
-  -webkit-animation: remi-stream-pulse var(--remi-stream-pulse-duration) ease-in-out infinite;
-  animation: remi-stream-pulse var(--remi-stream-pulse-duration) ease-in-out infinite;
-}
-
-@supports (selector(:has(*))) {
-  .result-streaming > :is(ul, ol):last-child > li:last-child:not(:has(> :is(ul, ol, pre))):after {
-    content: var(--remi-stream-caret);
-    display: inline-block;
-    width: auto;
-    height: auto;
-    margin-left: 0.25rem;
-    vertical-align: middle;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 0.65rem;
-    line-height: 1;
-    color: currentColor;
-    background: none;
-    -webkit-animation: remi-stream-pulse var(--remi-stream-pulse-duration) ease-in-out infinite;
-    animation: remi-stream-pulse var(--remi-stream-pulse-duration) ease-in-out infinite;
-  }
-}
-
 @supports not (selector(:has(*))) {
-  .result-streaming > ol:last-child > li:last-child:after,
-  .result-streaming > ul:last-child > li:last-child:after {
-    content: var(--remi-stream-caret);
-    display: inline-block;
-    width: auto;
-    height: auto;
-    margin-left: 0.25rem;
-    vertical-align: middle;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 0.65rem;
-    line-height: 1;
-    color: currentColor;
-    background: none;
-    -webkit-animation: remi-stream-pulse var(--remi-stream-pulse-duration) ease-in-out infinite;
-    animation: remi-stream-pulse var(--remi-stream-pulse-duration) ease-in-out infinite;
-  }
-
   .result-streaming > ol:last-child > li:last-child > :is(ul, ol, pre) ~ :after,
   .result-streaming > ul:last-child > li:last-child > :is(ul, ol, pre) ~ :after {
     display: none;
@@ -3052,18 +2963,6 @@ html {
   }
 }
 
-@keyframes glass-breathe {
-  0%,
-  100% {
-    opacity: 0.45;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.7;
-    transform: scale(1.06);
-  }
-}
-
 @keyframes glass-enter {
   from {
     opacity: 0;
@@ -3092,6 +2991,24 @@ html {
     animation: remi-mesh-drift 32s ease-in-out infinite;
   }
 
+  .remi-orb {
+    border-radius: 9999px;
+    filter: blur(72px);
+    opacity: 0.45;
+  }
+
+  .remi-orb--violet {
+    background: rgb(var(--remi-orb-violet) / 0.55);
+  }
+
+  .remi-orb--teal {
+    background: rgb(var(--remi-orb-teal) / 0.45);
+  }
+
+  .remi-orb--blue {
+    background: rgb(var(--remi-orb-blue) / 0.4);
+  }
+
   .remi-ambient-bg::before {
     content: '';
     position: absolute;
@@ -3103,27 +3020,36 @@ html {
     z-index: 0;
   }
 
-  .remi-orb {
-    position: absolute;
-    pointer-events: none;
-    border-radius: 9999px;
-    filter: blur(64px);
-    animation: glass-breathe 8s ease-in-out infinite;
-    z-index: 0;
+  .remi-orb-webgl-layer {
+    opacity: 0.2;
+    mix-blend-mode: soft-light;
+    filter: saturate(0.65) blur(0.5px);
   }
 
-  .remi-orb--violet {
-    background: rgb(var(--remi-orb-violet) / 0.35);
+  /* Shift orb toward chat column center (sidebar on the left; width synced via --remi-sidebar-width). */
+  .remi-orb-webgl-layer--chat {
+    transform: translateX(calc(var(--remi-sidebar-width, 360px) / 2 + 8px));
+    transition: transform 300ms cubic-bezier(0.2, 0, 0, 1);
   }
 
-  .remi-orb--teal {
-    background: rgb(var(--remi-orb-teal) / 0.22);
-    animation-delay: -2s;
+  /* Landing: reserve space for BorderGlow bleed and keep hero + composer separated */
+  .chat-landing-hero {
+    margin-block: 0.25rem 0.5rem;
+    padding-inline: 0.25rem;
   }
 
-  .remi-orb--blue {
-    background: rgb(var(--remi-orb-blue) / 0.2);
-    animation-delay: -4s;
+  .dark .remi-orb-webgl-layer {
+    opacity: 0.16;
+    mix-blend-mode: screen;
+    filter: saturate(0.55);
+  }
+
+  .remi-orb-webgl-layer.remi-orb-webgl-layer--streaming {
+    opacity: 0.28;
+  }
+
+  .dark .remi-orb-webgl-layer.remi-orb-webgl-layer--streaming {
+    opacity: 0.22;
   }
 
   .glass-panel {
@@ -3302,9 +3228,8 @@ html {
     background-size: 100% 100%;
   }
 
-  .remi-orb {
-    animation: none;
-    opacity: 0.35;
+  .remi-orb-webgl-layer {
+    display: none;
   }
 
   .glass-panel--active::after {
@@ -3326,8 +3251,7 @@ html {
   .result-streaming > :not(ol):not(ul):not(pre):last-child:after,
   .result-streaming > pre:last-child code:after,
   .result-streaming > :is(ul, ol):last-child > li:last-child:after,
-  .remi-preview-streaming::after,
-  .submitting .result-thinking:empty:last-child:after {
+  .remi-preview-streaming::after {
     animation: none;
     opacity: 0.85;
   }

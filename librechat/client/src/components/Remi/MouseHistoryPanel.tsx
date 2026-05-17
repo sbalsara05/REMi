@@ -1,8 +1,8 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import type { TRemiInteraction } from 'librechat-data-provider';
-import { Button, Skeleton, Spinner } from '@librechat/client';
+import { Skeleton, Spinner, useToastContext } from '@librechat/client';
 import { WarningCircle } from '@phosphor-icons/react';
 import { RemiMouse } from '~/components/Icons';
 import {
@@ -16,8 +16,10 @@ import {
 } from '~/data-provider';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
+import { RemiBorderGlow } from '~/components/BorderGlow';
 import RemiEmptyState from './RemiEmptyState';
 import { useRemiPreviewStreaming } from './useRemiPreviewStreaming';
+import { useRemiScreenshotUrl } from './useRemiScreenshotUrl';
 
 function formatRelativeTime(createdAt: number) {
   const diffMs = Date.now() - createdAt;
@@ -46,22 +48,55 @@ function RemiInteractionCard({
   disabled: boolean;
   onOpen: () => void;
 }) {
-  const preview = (item.prompt || item.responseSoFar || 'Interaction').trim();
+  const preview = (item.responseSoFar || item.prompt || 'Interaction').trim();
   const isPreviewStreaming = useRemiPreviewStreaming(item.id, item.responseSoFar);
-  const screenshotUrl = item.screenshotPath
-    ? `/api/remi/interactions/${item.id}/screenshot`
-    : null;
+  const hasScreenshot = item.hasScreenshot ?? Boolean(item.screenshotPath);
+  const { url: screenshotUrl, state: screenshotState } = useRemiScreenshotUrl(
+    item.id,
+    hasScreenshot,
+  );
+
+  const handleActivate = () => {
+    if (disabled) {
+      return;
+    }
+    onOpen();
+  };
 
   return (
     <motion.article
       variants={glassCardVariants}
-      whileHover={glassCardHover}
-      className="glass-card remi-radius-card overflow-hidden p-2.5"
+      whileHover={disabled ? undefined : glassCardHover}
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled}
+      aria-busy={disabled}
+      onClick={handleActivate}
+      onKeyDown={(event) => {
+        if (disabled) {
+          return;
+        }
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      className={cn(
+        'relative z-[1] w-full',
+        disabled ? 'cursor-wait opacity-80' : 'cursor-pointer',
+      )}
       style={{ '--stagger-index': index } as React.CSSProperties}
     >
+      <RemiBorderGlow
+        variant="card"
+        active={isPreviewStreaming}
+        glowMode={isPreviewStreaming ? 'stream' : 'hover'}
+        className="remi-radius-card w-full"
+        innerClassName="overflow-hidden p-2.5 text-left"
+      >
       <div className="mb-2 flex items-center justify-between gap-2 text-xs text-text-secondary">
         <div className="flex items-center gap-1.5">
-          <RemiMouse clip="walkSide" size="sm" className="shrink-0" />
+          <RemiMouse clip="idle" size="sm" className="pointer-events-none shrink-0" />
           <span>{formatRelativeTime(item.createdAt)}</span>
         </div>
         <span
@@ -69,51 +104,55 @@ function RemiInteractionCard({
             'rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide',
             item.syncedToChat
               ? 'bg-surface-tertiary/80 text-text-secondary'
-              : 'bg-brand-purple/15 text-brand-purple',
+              : isPreviewStreaming
+                ? 'bg-brand-purple/20 text-brand-purple'
+                : 'bg-brand-purple/15 text-brand-purple',
           )}
         >
-          {item.syncedToChat ? 'In chat' : 'Ready'}
+          {item.syncedToChat ? 'In chat' : isPreviewStreaming ? 'Streaming' : 'Ready'}
         </span>
       </div>
-      {screenshotUrl && (
-        <motion.div
-          className="remi-radius-control mb-2 overflow-hidden border border-white/10 shadow-inner"
-          layoutId={`remi-shot-${item.id}`}
-        >
-          <img
-            src={screenshotUrl}
-            alt=""
-            className="aspect-video w-full object-cover object-top"
-          />
-        </motion.div>
+      {hasScreenshot && screenshotState !== 'missing' && (
+        <div className="remi-radius-control pointer-events-none mb-2 overflow-hidden border border-white/10 shadow-inner">
+          {screenshotUrl ? (
+            <img
+              src={screenshotUrl}
+              alt=""
+              className="aspect-video w-full object-cover object-top"
+            />
+          ) : (
+            <Skeleton className="aspect-video w-full" />
+          )}
+        </div>
       )}
       <p
         className={cn(
-          'mb-2.5 line-clamp-3 text-sm leading-snug text-text-primary',
+          'pointer-events-none mb-2.5 line-clamp-3 text-sm leading-snug text-text-primary',
           isPreviewStreaming && 'remi-preview-streaming',
         )}
       >
         {preview}
       </p>
-      <Button
-        type="button"
-        size="sm"
-        variant={item.syncedToChat ? 'outline' : 'default'}
-        className="w-full"
-        disabled={disabled}
-        onClick={onOpen}
+      <span
+        className={cn(
+          'pointer-events-none inline-flex h-9 w-full items-center justify-center rounded-lg px-3 text-sm font-medium',
+          item.syncedToChat
+            ? 'border border-border-medium bg-transparent text-text-primary'
+            : 'bg-primary text-primary-foreground',
+        )}
       >
-        {item.syncedToChat ? 'Open chat' : 'Open in chat'}
-      </Button>
+        {disabled ? <Spinner className="size-4" /> : item.syncedToChat ? 'Open chat' : 'Open in chat'}
+      </span>
+      </RemiBorderGlow>
     </motion.article>
   );
 }
 
 function MouseHistoryChrome({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex flex-col">
+    <div className="relative z-[1] flex flex-col">
       <div className="mb-3 flex items-center gap-2 px-3 pt-2">
-        <RemiMouse clip="attackSide" size="md" />
+        <RemiMouse clip="attackSide" size="md" className="pointer-events-none" />
         <div className="mouse-stripe-divider min-w-0 flex-1 shrink-0" aria-hidden />
       </div>
       {children}
@@ -124,6 +163,8 @@ function MouseHistoryChrome({ children }: { children: React.ReactNode }) {
 export default function MouseHistoryPanel() {
   const localize = useLocalize();
   const navigate = useNavigate();
+  const { showToast } = useToastContext();
+  const [openingId, setOpeningId] = useState<string | null>(null);
   const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useRemiInteractionsInfiniteQuery();
   const handoff = useRemiHandoffMutation();
@@ -134,26 +175,32 @@ export default function MouseHistoryPanel() {
   );
 
   const onOpenInChat = async (interactionId: string, existingConvoId?: string | null) => {
-    if (existingConvoId) {
-      navigate(`/c/${existingConvoId}`);
-      return;
+    setOpeningId(interactionId);
+    try {
+      if (existingConvoId) {
+        navigate(`/c/${existingConvoId}`);
+        return;
+      }
+      const result = await handoff.mutateAsync(interactionId);
+      navigate(`/c/${result.conversationId}`);
+    } catch {
+      showToast({
+        message: localize('com_ui_error') ?? 'Could not open capture in chat.',
+        status: 'error',
+      });
+    } finally {
+      setOpeningId(null);
     }
-    const result = await handoff.mutateAsync(interactionId);
-    navigate(`/c/${result.conversationId}`);
   };
 
   if (isLoading) {
     return (
       <MouseHistoryChrome>
-        <motion.div
-          className="flex flex-col gap-2 px-3 pb-3 pt-0"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-        >
+        <div className="flex flex-col gap-2 px-3 pb-3 pt-0">
           {[0, 1, 2].map((i) => (
             <Skeleton key={i} className="glass-card remi-radius-card h-36 w-full" />
           ))}
-        </motion.div>
+        </div>
       </MouseHistoryChrome>
     );
   }
@@ -162,12 +209,16 @@ export default function MouseHistoryPanel() {
     return (
       <MouseHistoryChrome>
         <div className="px-3 pb-3 pt-0">
-          <div className="glass-card remi-radius-card flex flex-col items-center gap-2 p-4 text-center">
+          <RemiBorderGlow
+            variant="card"
+            className="remi-radius-card w-full"
+            innerClassName="flex flex-col items-center gap-2 p-4 text-center"
+          >
             <WarningCircle className="size-8 text-text-destructive" weight="regular" />
             <p className="text-sm text-text-secondary">
               {localize('com_ui_error') ?? 'Could not load capture history.'}
             </p>
-          </div>
+          </RemiBorderGlow>
         </div>
       </MouseHistoryChrome>
     );
@@ -185,9 +236,9 @@ export default function MouseHistoryPanel() {
 
   return (
     <MouseHistoryChrome>
-      <div className="flex max-h-[70vh] flex-col px-3 pb-3 pt-0">
+      <div className="relative z-[1] flex max-h-[70vh] flex-col px-3 pb-3 pt-0">
         <motion.div
-          className="glass-stagger flex flex-col gap-2 overflow-y-auto"
+          className="glass-stagger pointer-events-auto flex flex-col gap-2 overflow-y-auto"
           variants={glassStaggerContainer}
           initial="hidden"
           animate="visible"
@@ -197,22 +248,26 @@ export default function MouseHistoryPanel() {
               key={item.id}
               item={item}
               index={index}
-              disabled={handoff.isLoading}
+              disabled={openingId === item.id}
               onOpen={() => onOpenInChat(item.id, item.conversationId)}
             />
           ))}
         </motion.div>
         {hasNextPage && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="glass-popover remi-radius-control mt-2 w-full"
-            disabled={isFetchingNextPage}
-            onClick={() => fetchNextPage()}
+          <RemiBorderGlow
+            variant="popover"
+            className="remi-radius-control mt-2 w-full"
+            innerClassName="overflow-hidden"
           >
-            {isFetchingNextPage ? <Spinner className="size-4" /> : 'Load more'}
-          </Button>
+            <button
+              type="button"
+              className="inline-flex h-9 w-full items-center justify-center px-3 text-sm font-medium text-text-primary hover:bg-surface-hover"
+              disabled={isFetchingNextPage}
+              onClick={() => fetchNextPage()}
+            >
+              {isFetchingNextPage ? <Spinner className="size-4" /> : 'Load more'}
+            </button>
+          </RemiBorderGlow>
         )}
       </div>
     </MouseHistoryChrome>

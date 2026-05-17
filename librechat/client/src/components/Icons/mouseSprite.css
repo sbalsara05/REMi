@@ -15,3 +15,13 @@
 .remi-sprite--paused {
   animation: none !important;
 }
+
+@keyframes remi-sprite-idle-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-1.5px);
+  }
+}

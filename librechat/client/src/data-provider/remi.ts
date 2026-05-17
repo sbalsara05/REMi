@@ -19,6 +19,14 @@ export const useRemiInteractionsQuery = (
   );
 };
 
+const REMI_LIVE_POLL_MS = 500;
+const REMI_RECENT_CAPTURE_MS = 5 * 60 * 1000;
+
+function hasRecentUnsyncedCapture(interactions: { createdAt: number; syncedToChat: boolean }[]) {
+  const cutoff = Date.now() - REMI_RECENT_CAPTURE_MS;
+  return interactions.some((item) => !item.syncedToChat && item.createdAt >= cutoff);
+}
+
 export const useRemiInteractionsInfiniteQuery = () => {
   return useInfiniteQuery<TRemiInteractionsResponse>(
     [QueryKeys.remiInteractions, 'infinite'],
@@ -30,6 +38,10 @@ export const useRemiInteractionsInfiniteQuery = () => {
     {
       getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
       refetchOnWindowFocus: true,
+      refetchInterval: (data) => {
+        const interactions = data?.pages.flatMap((page) => page.interactions) ?? [];
+        return hasRecentUnsyncedCapture(interactions) ? REMI_LIVE_POLL_MS : false;
+      },
     },
   );
 };

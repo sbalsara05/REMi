@@ -50,6 +50,48 @@ function getScreenshotsDir() {
   return path.join(path.dirname(getDbPath()), 'screenshots');
 }
 
+/** Host Application Support path when DB stores Docker volume paths (/remi-handoff/...). */
+function getDefaultHandoffRoot() {
+  return path.join(os.homedir(), 'Library', 'Application Support', 'REMi');
+}
+
+function remapDockerScreenshotPath(storedPath) {
+  if (!storedPath || typeof storedPath !== 'string') {
+    return null;
+  }
+  if (!storedPath.startsWith('/remi-handoff/')) {
+    return storedPath;
+  }
+  return path.join(getDefaultHandoffRoot(), storedPath.slice('/remi-handoff/'.length));
+}
+
+/** Resolves a readable screenshot file for an interaction (DB path, Docker remap, or {id}.png). */
+function resolveInteractionScreenshotPath(interaction) {
+  if (!interaction?.id) {
+    return null;
+  }
+
+  const candidates = [];
+  if (interaction.screenshotPath) {
+    candidates.push(interaction.screenshotPath);
+    candidates.push(remapDockerScreenshotPath(interaction.screenshotPath));
+  }
+
+  try {
+    candidates.push(resolveScreenshotPath(interaction.id));
+  } catch {
+    // invalid id shape — skip canonical fallback
+  }
+
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
 function ensureDirs() {
   const dbPath = getDbPath();
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -72,7 +114,7 @@ function mapRow(row) {
   if (!row) {
     return null;
   }
-  return {
+  const interaction = {
     id: row.id,
     createdAt: row.created_at,
     prompt: row.prompt,
@@ -82,6 +124,12 @@ function mapRow(row) {
     cropHash: row.crop_hash,
     syncedToChat: Boolean(row.synced_to_chat),
     conversationId: row.conversation_id,
+  };
+  const resolvedScreenshotPath = resolveInteractionScreenshotPath(interaction);
+  return {
+    ...interaction,
+    screenshotPath: resolvedScreenshotPath,
+    hasScreenshot: Boolean(resolvedScreenshotPath),
   };
 }
 
@@ -230,6 +278,7 @@ module.exports = {
   getDbPath,
   getScreenshotsDir,
   validateInteractionId,
+  resolveInteractionScreenshotPath,
   listInteractions,
   getInteraction,
   upsertInteraction,

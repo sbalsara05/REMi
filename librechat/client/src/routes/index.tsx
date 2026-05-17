@@ -11,7 +11,8 @@ import {
 import { MarketplaceProvider } from '~/components/Agents/MarketplaceContext';
 import AgentMarketplace from '~/components/Agents/Marketplace';
 import { OAuthSuccess, OAuthError } from '~/components/OAuth';
-import { AuthContextProvider } from '~/hooks/AuthContext';
+import { AuthContextProvider, useAuthContext } from '~/hooks/AuthContext';
+import RemiSplash from '~/components/Remi/RemiSplash';
 import RouteErrorBoundary from './RouteErrorBoundary';
 import StartupLayout from './Layouts/Startup';
 import LoginLayout from './Layouts/Login';
@@ -21,10 +22,20 @@ import ChatRoute from './ChatRoute';
 import Search from './Search';
 import Root from './Root';
 
+function AuthBootShell() {
+  const { isAuthReady } = useAuthContext();
+  return (
+    <>
+      <RemiSplash ready={isAuthReady} />
+      <Outlet />
+      <ApiErrorWatcher />
+    </>
+  );
+}
+
 const AuthLayout = () => (
   <AuthContextProvider>
-    <Outlet />
-    <ApiErrorWatcher />
+    <AuthBootShell />
   </AuthContextProvider>
 );
 

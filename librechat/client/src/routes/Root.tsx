@@ -23,7 +23,6 @@ import { TermsAndConditionsModal } from '~/components/ui';
 import { useHealthCheck } from '~/data-provider';
 import { Banner } from '~/components/Banners';
 import RemiAmbient from '~/components/Glass/RemiAmbient';
-import RemiCompanion from '~/components/Remi/RemiCompanion';
 
 export default function Root() {
   const [showTerms, setShowTerms] = useState(false);
@@ -85,7 +84,6 @@ export default function Root() {
                     inert={isSmallScreen && sidebarExpanded ? '' : undefined}
                   >
                     <Outlet />
-                    <RemiCompanion />
                   </div>
                 </RemiAmbient>
               </div>

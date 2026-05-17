@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -20,6 +20,9 @@ jest.mock('framer-motion', () => ({
     div: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
       <div {...props}>{children}</div>
     ),
+    span: ({ children, ...props }: React.HTMLAttributes<HTMLSpanElement>) => (
+      <span {...props}>{children}</span>
+    ),
     article: ({ children, ...props }: React.HTMLAttributes<HTMLElement>) => (
       <article {...props}>{children}</article>
     ),
@@ -28,6 +31,19 @@ jest.mock('framer-motion', () => ({
 
 jest.mock('~/hooks', () => ({
   useLocalize: () => (key: string) => key,
+}));
+
+jest.mock('@librechat/client', () => ({
+  ...jest.requireActual('@librechat/client'),
+  useToastContext: () => ({ showToast: jest.fn() }),
+}));
+
+jest.mock('./useRemiScreenshotUrl', () => ({
+  useRemiScreenshotUrl: jest.fn((id: string, enabled: boolean) =>
+    enabled
+      ? { url: `blob:mock-screenshot-${id}`, state: 'ready' as const }
+      : { url: null, state: 'idle' as const },
+  ),
 }));
 
 jest.mock('~/data-provider', () => ({
@@ -136,7 +152,7 @@ describe('MouseHistoryPanel', () => {
     });
 
     renderPanel();
-    await userEvent.click(screen.getByRole('button', { name: 'Open chat' }));
+    await userEvent.click(screen.getByRole('button', { name: /Open chat/i }));
 
     expect(mockMutateAsync).not.toHaveBeenCalled();
     expect(mockNavigate).toHaveBeenCalledWith('/c/convo-existing');
@@ -172,7 +188,8 @@ describe('MouseHistoryPanel', () => {
     });
 
     renderPanel();
-    await userEvent.click(screen.getByRole('button', { name: 'Open in chat' }));
+    const card = screen.getByRole('button', { name: /Open in chat/i });
+    await userEvent.click(card);
 
     await waitFor(() => {
       expect(mockMutateAsync).toHaveBeenCalledWith('fresh-1');
@@ -213,7 +230,8 @@ describe('MouseHistoryPanel', () => {
     expect(screen.getAllByTestId('remi-sprite-mouse').length).toBeGreaterThan(0);
   });
 
-  it('applies preview streaming class when responseSoFar grows', async () => {
+  it('switches card sprite to lookUp when preview stream grows', async () => {
+    jest.useFakeTimers();
     let responseSoFar: string | null = 'Partial';
 
     useRemiInteractionsInfiniteQuery.mockImplementation(() => ({
@@ -268,6 +286,42 @@ describe('MouseHistoryPanel', () => {
     await waitFor(() => {
       expect(document.querySelector('.remi-preview-streaming')).toBeInTheDocument();
     });
+
+    jest.useRealTimers();
+  });
+
+  it('renders screenshot img when screenshotPath is set', () => {
+    useRemiInteractionsInfiniteQuery.mockReturnValue({
+      data: {
+        pages: [
+          {
+            interactions: [
+              {
+                id: 'shot-1',
+                createdAt: Date.now(),
+                prompt: 'Capture',
+                responseSoFar: null,
+                screenshotPath: '/tmp/shot.png',
+                model: null,
+                cropHash: null,
+                syncedToChat: false,
+                conversationId: null,
+              },
+            ],
+            nextCursor: null,
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      fetchNextPage: mockFetchNextPage,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+    });
+
+    const { container } = renderPanel();
+    const img = container.querySelector('article img');
+    expect(img).toHaveAttribute('src', 'blob:mock-screenshot-shot-1');
   });
 
   it('shows mouse stripe divider chrome', () => {

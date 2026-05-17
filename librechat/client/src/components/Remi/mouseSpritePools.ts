@@ -1,44 +1,21 @@
-import { MOUSE_SPRITE_CLIPS, type MouseSpriteClip } from '~/components/Icons/mouseSpriteCatalog';
+import type { MouseSpriteClip } from '~/components/Icons/mouseSpriteCatalog';
 
-export const IDLE_CLIPS: readonly MouseSpriteClip[] = ['idleFront', 'idleSide', 'idleBack'];
+export const IDLE_CLIPS: readonly MouseSpriteClip[] = ['idle'];
 
-export function idleClipForCorner(corner: SpriteFacingCorner): MouseSpriteClip {
-  if (corner === 'br' || corner === 'bl') {
-    return 'idleFront';
-  }
-  if (corner === 'tl' || corner === 'tr') {
-    return 'idleBack';
-  }
-  return 'idleSide';
+export function idleClipForCorner(_corner: SpriteFacingCorner): MouseSpriteClip {
+  return 'idle';
 }
 
-export const ACTION_CLIPS: readonly MouseSpriteClip[] = [
-  'walkSide',
-  'walkFront',
-  'walkBack',
-  'dashSide',
-  'attackSide',
-  'attackFront',
-  'attackBack',
-];
+/** Subtle ambient clips — no run/slide (platformer stride drifts out of UI crop). */
+export const ACTION_CLIPS: readonly MouseSpriteClip[] = ['lookUp', 'jump', 'hurt'];
 
-export const EXCITED_CLIPS: readonly MouseSpriteClip[] = [
-  'dashSide',
-  'attackSide',
-  'attackFront',
-  'attackBack',
-  'powerFront',
-  'powerBack',
-];
+export const EXCITED_CLIPS: readonly MouseSpriteClip[] = ['slash', 'thrust', 'combo', 'jump'];
 
-export const STREAMING_CLIPS: readonly MouseSpriteClip[] = ['powerFront', 'walkSide', 'dashSide'];
-
-/** Full sheet — for hero / showcase moments */
-export const PLAYFUL_CLIPS: readonly MouseSpriteClip[] = Object.keys(
-  MOUSE_SPRITE_CLIPS,
-) as MouseSpriteClip[];
+export const STREAMING_CLIPS: readonly MouseSpriteClip[] = ['lookUp'];
 
 export type SpritePool = readonly MouseSpriteClip[];
+
+export type WeightedClip = { clip: MouseSpriteClip; weight: number };
 
 export function pickRandomClip(
   pool: SpritePool,
@@ -48,6 +25,27 @@ export function pickRandomClip(
     exclude && pool.length > 1 ? pool.filter((clip) => clip !== exclude) : [...pool];
   return choices[Math.floor(Math.random() * choices.length)] ?? pool[0];
 }
+
+export function pickWeightedClip(entries: readonly WeightedClip[], exclude?: MouseSpriteClip): MouseSpriteClip {
+  const pool =
+    exclude && entries.length > 1
+      ? entries.filter((e) => e.clip !== exclude)
+      : [...entries];
+  const total = pool.reduce((sum, e) => sum + e.weight, 0);
+  let roll = Math.random() * total;
+  for (const entry of pool) {
+    roll -= entry.weight;
+    if (roll <= 0) {
+      return entry.clip;
+    }
+  }
+  return pool[pool.length - 1]?.clip ?? entries[0].clip;
+}
+
+export const CLICK_SURPRISE_WEIGHTS: readonly WeightedClip[] = [
+  { clip: 'slash', weight: 3 },
+  { clip: 'thrust', weight: 2 },
+];
 
 export function randomBetween(min: number, max: number): number {
   return min + Math.random() * (max - min);
@@ -65,23 +63,20 @@ export function pickRandomCorner<T>(corners: readonly T[], exclude?: T): T {
 
 export type SpriteFacingCorner = 'br' | 'bl' | 'tl' | 'tr';
 
-/** Row 1 — approach the user from bottom corners. */
-export function walkClipForCorner(corner: SpriteFacingCorner): MouseSpriteClip {
-  return corner === 'br' || corner === 'bl' ? 'walkFront' : 'walkBack';
+export function walkClipForCorner(_corner: SpriteFacingCorner): MouseSpriteClip {
+  return 'idle';
 }
 
-/** Row 6–8 — slash toward the screen based on corner. */
 export function attackClipForCorner(corner: SpriteFacingCorner): MouseSpriteClip {
-  if (corner === 'br' || corner === 'tr') {
-    return 'attackSide';
+  if (corner === 'bl') {
+    return 'thrust';
   }
-  if (corner === 'bl' || corner === 'tl') {
-    return 'attackSide';
+  if (corner === 'tl') {
+    return 'combo';
   }
-  return 'attackFront';
+  return 'slash';
 }
 
-/** Row 4 — charge-up while the model streams. */
 export function streamingClip(): MouseSpriteClip {
-  return 'powerFront';
+  return 'lookUp';
 }

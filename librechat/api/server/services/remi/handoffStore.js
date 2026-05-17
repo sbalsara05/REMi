@@ -18,6 +18,15 @@ CREATE TABLE IF NOT EXISTS interactions (
   conversation_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_interactions_created_at ON interactions(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS remi_rag_chunks (
+  file_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  interaction_id TEXT,
+  kind TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rag_user_created ON remi_rag_chunks(user_id, created_at DESC);
 `;
 
 let dbInstance;
@@ -181,6 +190,35 @@ function markSynced(id, conversationId) {
   return getInteraction(id);
 }
 
+function insertRagChunk({ fileId, userId, interactionId, kind }) {
+  const db = getDb();
+  db.prepare(
+    `INSERT OR REPLACE INTO remi_rag_chunks (file_id, user_id, interaction_id, kind, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(fileId, userId, interactionId ?? null, kind, Date.now());
+}
+
+function nextRagSeq(interactionId) {
+  const db = getDb();
+  const row = db
+    .prepare(`SELECT COUNT(*) AS count FROM remi_rag_chunks WHERE interaction_id = ?`)
+    .get(interactionId);
+  return (row?.count ?? 0) + 1;
+}
+
+function listRagFileIdsForUser(userId, limit = 30) {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT file_id FROM remi_rag_chunks
+       WHERE user_id = ?
+       ORDER BY created_at DESC
+       LIMIT ?`,
+    )
+    .all(userId, limit);
+  return rows.map((r) => r.file_id);
+}
+
 function closeDb() {
   if (dbInstance) {
     dbInstance.close();
@@ -197,5 +235,8 @@ module.exports = {
   upsertInteraction,
   patchResponseSoFar,
   markSynced,
+  insertRagChunk,
+  nextRagSeq,
+  listRagFileIdsForUser,
   closeDb,
 };

@@ -28,9 +28,30 @@ router.get('/interactions', (req, res) => {
 
 router.get('/interactions/:id/screenshot', (req, res) => {
   try {
-    const interaction = handoffStore.getInteraction(req.params.id);
-    const screenshotPath = handoffStore.resolveInteractionScreenshotPath(interaction);
-    if (!screenshotPath) {
+    const { id } = req.params;
+    handoffStore.validateInteractionId(id);
+    const interaction = handoffStore.getInteraction(id);
+    if (!interaction) {
+      return res.status(404).json({ error: 'Interaction not found' });
+    }
+
+    const rawIndex = req.query.index;
+    const index = rawIndex === undefined || rawIndex === '' ? 0 : parseInt(String(rawIndex), 10);
+    if (!Number.isInteger(index) || index < 0 || index > 3) {
+      return res.status(400).json({ error: 'Invalid screenshot index' });
+    }
+
+    let screenshotPath;
+    try {
+      screenshotPath = handoffStore.resolveScreenshotPathForIndex(id, index);
+    } catch (error) {
+      if (error.message === 'Invalid screenshot index') {
+        return res.status(400).json({ error: error.message });
+      }
+      throw error;
+    }
+
+    if (!screenshotPath || !fs.existsSync(screenshotPath)) {
       return res.status(404).json({ error: 'Screenshot not found' });
     }
     res.type('png');
@@ -116,6 +137,8 @@ router.post('/context', async (req, res) => {
       screenshot,
       model,
       crop_hash,
+      hoveredText: typeof hoveredText === 'string' ? hoveredText : null,
+      appName: typeof appName === 'string' ? appName : null,
     });
 
     const indexText =
@@ -142,12 +165,12 @@ router.post('/context', async (req, res) => {
 
 router.post('/handoff', async (req, res) => {
   try {
-    const { interactionId } = req.body ?? {};
+    const { interactionId, response_so_far } = req.body ?? {};
     if (!interactionId) {
       return res.status(400).json({ error: 'interactionId is required' });
     }
 
-    const result = await handoffInteraction(req, interactionId);
+    const result = await handoffInteraction(req, interactionId, { response_so_far });
     res.status(200).json(result);
   } catch (error) {
     if (error.status === 404) {

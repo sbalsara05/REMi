@@ -1289,10 +1289,14 @@ export type TRemiInteraction = {
   responseSoFar?: string | null;
   screenshotPath?: string | null;
   hasScreenshot?: boolean;
+  screenshotCount?: number;
   model?: string | null;
   cropHash?: string | null;
   syncedToChat: boolean;
   conversationId?: string | null;
+  appName?: string | null;
+  hoveredText?: string | null;
+  mergedContextText?: string | null;
 };
 
 export type TRemiInteractionsResponse = {
@@ -1310,8 +1314,11 @@ export function getRemiInteraction(id: string): Promise<TRemiInteraction> {
   return request.get(endpoints.remiInteraction(id));
 }
 
-export function getRemiInteractionScreenshot(id: string): Promise<AxiosResponse<Blob>> {
-  return request.getResponse(endpoints.remiInteractionScreenshot(id), {
+export function getRemiInteractionScreenshot(
+  id: string,
+  index?: number,
+): Promise<AxiosResponse<Blob>> {
+  return request.getResponse(endpoints.remiInteractionScreenshot(id, index), {
     responseType: 'blob',
     headers: {
       Accept: 'image/png, image/*',

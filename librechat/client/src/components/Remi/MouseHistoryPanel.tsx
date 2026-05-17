@@ -18,6 +18,8 @@ import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
 import { RemiBorderGlow } from '~/components/BorderGlow';
 import RemiEmptyState from './RemiEmptyState';
+import RemiContextButton from './RemiContextButton';
+import RemiContextInspector from './RemiContextInspector';
 import { useRemiPreviewStreaming } from './useRemiPreviewStreaming';
 import { useRemiScreenshotUrl } from './useRemiScreenshotUrl';
 
@@ -42,15 +44,26 @@ function RemiInteractionCard({
   index,
   disabled,
   onOpen,
+  onViewContext,
 }: {
   item: TRemiInteraction;
   index: number;
   disabled: boolean;
   onOpen: () => void;
+  onViewContext: () => void;
 }) {
   const preview = (item.responseSoFar || item.prompt || 'Interaction').trim();
   const isPreviewStreaming = useRemiPreviewStreaming(item.id, item.responseSoFar);
   const hasScreenshot = item.hasScreenshot ?? Boolean(item.screenshotPath);
+  const screenshotSlots = Math.max(item.screenshotCount ?? 0, hasScreenshot ? 1 : 0);
+  const hasContextBody = Boolean(
+    screenshotSlots > 0 ||
+      item.mergedContextText?.trim() ||
+      item.hoveredText?.trim() ||
+      item.prompt?.trim() ||
+      item.responseSoFar?.trim(),
+  );
+  const contextCount = screenshotSlots > 0 ? screenshotSlots : hasContextBody ? 1 : 0;
   const { url: screenshotUrl, state: screenshotState } = useRemiScreenshotUrl(
     item.id,
     hasScreenshot,
@@ -99,18 +112,29 @@ function RemiInteractionCard({
           <RemiMouse clip="idle" size="sm" className="pointer-events-none shrink-0" />
           <span>{formatRelativeTime(item.createdAt)}</span>
         </div>
-        <span
-          className={cn(
-            'rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide',
-            item.syncedToChat
-              ? 'bg-surface-tertiary/80 text-text-secondary'
-              : isPreviewStreaming
-                ? 'bg-brand-purple/20 text-brand-purple'
-                : 'bg-brand-purple/15 text-brand-purple',
-          )}
-        >
-          {item.syncedToChat ? 'In chat' : isPreviewStreaming ? 'Streaming' : 'Ready'}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <RemiContextButton
+            count={contextCount}
+            disabled={disabled || !hasContextBody}
+            className="pointer-events-auto"
+            onClick={(event) => {
+              event.stopPropagation();
+              onViewContext();
+            }}
+          />
+          <span
+            className={cn(
+              'rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide',
+              item.syncedToChat
+                ? 'bg-surface-tertiary/80 text-text-secondary'
+                : isPreviewStreaming
+                  ? 'bg-brand-purple/20 text-brand-purple'
+                  : 'bg-brand-purple/15 text-brand-purple',
+            )}
+          >
+            {item.syncedToChat ? 'In chat' : isPreviewStreaming ? 'Streaming' : 'Ready'}
+          </span>
+        </div>
       </div>
       {hasScreenshot && screenshotState !== 'missing' && (
         <div className="remi-radius-control pointer-events-none mb-2 overflow-hidden border border-white/10 shadow-inner">
@@ -165,6 +189,7 @@ export default function MouseHistoryPanel() {
   const navigate = useNavigate();
   const { showToast } = useToastContext();
   const [openingId, setOpeningId] = useState<string | null>(null);
+  const [contextInspectorItem, setContextInspectorItem] = useState<TRemiInteraction | null>(null);
   const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useRemiInteractionsInfiniteQuery();
   const handoff = useRemiHandoffMutation();
@@ -236,6 +261,15 @@ export default function MouseHistoryPanel() {
 
   return (
     <MouseHistoryChrome>
+      <RemiContextInspector
+        item={contextInspectorItem}
+        open={contextInspectorItem != null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setContextInspectorItem(null);
+          }
+        }}
+      />
       <div className="relative z-[1] flex max-h-[70vh] flex-col px-3 pb-3 pt-0">
         <motion.div
           className="glass-stagger pointer-events-auto flex flex-col gap-2 overflow-y-auto"
@@ -250,6 +284,7 @@ export default function MouseHistoryPanel() {
               index={index}
               disabled={openingId === item.id}
               onOpen={() => onOpenInChat(item.id, item.conversationId)}
+              onViewContext={() => setContextInspectorItem(item)}
             />
           ))}
         </motion.div>

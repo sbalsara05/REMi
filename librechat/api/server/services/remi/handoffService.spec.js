@@ -103,6 +103,63 @@ describe('handoffService', () => {
         }),
       }),
     );
+    expect(userSave[1].files).toEqual([
+      expect.objectContaining({
+        file_id: 'file-shot-1',
+        filepath: '/files/screenshot.png',
+        type: expect.stringContaining('image'),
+      }),
+    ]);
+  });
+
+  it('attaches multiple IMAGE_FILE parts when extra screenshots exist', async () => {
+    const { ContentTypes } = require('librechat-data-provider');
+    handoffStore.upsertInteraction({
+      id: 'handoff-multi',
+      prompt: 'Compare these screens',
+      screenshot: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==',
+      additionalScreenshots: [
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==',
+      ],
+    });
+
+    let callCount = 0;
+    uploadImageBuffer.mockImplementation(async () => {
+      callCount += 1;
+      return {
+        file_id: `file-shot-${callCount}`,
+        filepath: `/files/screenshot-${callCount}.png`,
+        filename: `screenshot-${callCount}.png`,
+        width: 64,
+        height: 64,
+      };
+    });
+
+    await handoffService.handoffInteraction(req, 'handoff-multi');
+
+    const userSave = db.saveMessage.mock.calls.find(
+      ([, payload]) => payload.isCreatedByUser === true,
+    );
+    const imageParts = userSave[1].content?.filter((part) => part.type === ContentTypes.IMAGE_FILE);
+    expect(imageParts).toHaveLength(2);
+    expect(userSave[1].files).toHaveLength(2);
+  });
+
+  it('patches response_so_far from handoff body before creating messages', async () => {
+    handoffStore.upsertInteraction({
+      id: 'handoff-response',
+      prompt: 'Explain this',
+      response_so_far: 'Partial',
+    });
+
+    await handoffService.handoffInteraction(req, 'handoff-response', {
+      response_so_far: 'Full overlay answer',
+    });
+
+    const assistantSave = db.saveMessage.mock.calls.find(
+      ([, payload]) => payload.isCreatedByUser === false,
+    );
+    expect(assistantSave[1].text).toBe('Full overlay answer');
   });
 
   it('returns alreadySynced without creating a new conversation', async () => {

@@ -10,12 +10,15 @@
 //
 // Triggers:
 //   Wiggle / ⌥Space     → open overlay
-//   Shift (no overlay)  → silent pre-capture
-//   Shift (overlay open)→ hover target, tap Shift to add context
+//   ⌥C (no overlay)     → silent pre-capture at cursor
+//   ⌥C (overlay open)   → add context at cursor
+//   ⌥Click (overlay)    → add context at click point
+//   ⌘C (overlay)        → append clipboard text to session context
 
 import Cocoa
 import CoreGraphics
 import ApplicationServices
+import ScreenCaptureKit
 import Security
 
 // ─────────────────────────────────────────────
@@ -24,6 +27,9 @@ import Security
 
 enum Config {
     static let remiBaseURL                = "http://localhost:3080/api/remi"
+    /// Chat UI for handoff. API uses remiBaseURL (3080). Override with REMI_LIBRECHAT_WEB_URL (e.g. Docker 3080).
+    static let librechatWebURL            = ProcessInfo.processInfo.environment["REMI_LIBRECHAT_WEB_URL"]
+        ?? "http://localhost:3090"
     static let wiggleThreshold: Int       = 3
     static let wiggleWindowSeconds        = 1.2
     static let wiggleMinDistance: CGFloat = 28
@@ -40,6 +46,9 @@ enum Config {
     static let cursorCaptureSize: CGFloat = 360
     static let selectModeKeyCode: UInt16  = 49   // Space
     static let selectModeModifiers: NSEvent.ModifierFlags = [.command, .shift]
+    static let contextCaptureKeyCode: UInt16 = 8 // C
+    static let contextCaptureModifiers: NSEvent.ModifierFlags = [.option]
+    static let contextCaptureHint = "⌥C"
     /// Max images sent per query (1 primary + extras) to stay within model limits.
     static let maxScreenshotsPerQuery = 4
 }
@@ -125,7 +134,10 @@ enum LLM: String, CaseIterable {
 private enum OverlayLayout {
     static let margin: CGFloat = 14
     static let topInset: CGFloat = 8
-    static let headerH: CGFloat = 20
+    static let titleBarH: CGFloat = 28
+    static let trafficLightSize: CGFloat = 12
+    static let trafficLightGap: CGFloat = 6
+    static let contextPillW: CGFloat = 88
     static let pickerH: CGFloat = 28
     static let rowGap: CGFloat = 6
     static let inputH: CGFloat = 32
@@ -133,18 +145,21 @@ private enum OverlayLayout {
     static let inputSpriteRaise: CGFloat = 9
     static let separatorH: CGFloat = 1
     static let contextRowH: CGFloat = 32
+    static let handoffRowH: CGFloat = 30
+    static let nudgeRowH: CGFloat = 52
     static let minimumResponseHeight: CGFloat = 40
     static let bottomPad: CGFloat = 8
     static let containerInset: CGFloat = 12
 
     static var chromeAboveContext: CGFloat {
-        topInset + headerH + rowGap + pickerH + rowGap + inputH + rowGap + separatorH + rowGap
+        topInset + titleBarH + rowGap + pickerH + rowGap + inputH + rowGap + separatorH + rowGap
     }
 
     static var minimumInnerHeight: CGFloat {
-        max(
-            chromeAboveContext + contextRowH + bottomPad,
-            chromeAboveContext + minimumResponseHeight + bottomPad
+        let handoffChrome = handoffRowH + rowGap
+        return max(
+            chromeAboveContext + contextRowH + handoffChrome + bottomPad,
+            chromeAboveContext + minimumResponseHeight + handoffChrome + bottomPad
         )
     }
 
@@ -469,23 +484,40 @@ final class ContextCapturer {
         return String(text.prefix(maxChars)) + "…"
     }
 
-    private func captureRegion(_ rect: CGRect) -> Data? {
-        guard let image = CGWindowListCreateImage(
-            rect,
-            .optionOnScreenOnly,
-            kCGNullWindowID,
-            .bestResolution
-        ) else {
-            return nil
+    func captureRegion(_ rect: CGRect, completion: @escaping (Data?) -> Void) {
+        if #unavailable(macOS 14.0) {
+            completion(nil)
+            return
         }
-        return NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
-    }
 
-    private func captureRegion(_ rect: CGRect, completion: @escaping (Data?) -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let data = self?.captureRegion(rect)
-            DispatchQueue.main.async {
-                completion(data)
+        Task {
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                guard let display = content.displays.first(where: { $0.frame.contains(CGPoint(x: rect.midX, y: rect.midY)) })
+                        ?? content.displays.first else {
+                    await MainActor.run { completion(nil) }
+                    return
+                }
+
+                let displayRelativeRect = CGRect(
+                    x: rect.origin.x - display.frame.origin.x,
+                    y: rect.origin.y - display.frame.origin.y,
+                    width: rect.width,
+                    height: rect.height
+                ).integral
+
+                let config = SCStreamConfiguration()
+                config.sourceRect = displayRelativeRect
+                config.width = Int(displayRelativeRect.width)
+                config.height = Int(displayRelativeRect.height)
+                config.showsCursor = false
+
+                let filter = SCContentFilter(display: display, excludingWindows: [])
+                let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+                await MainActor.run { completion(data) }
+            } catch {
+                await MainActor.run { completion(nil) }
             }
         }
     }
@@ -776,6 +808,9 @@ struct RemiCatalogSkill: Decodable {
     let name: String
     let displayName: String?
     let description: String?
+}
+
+// ─────────────────────────────────────────────
 // MARK: — REMi SSE stream handler
 // ─────────────────────────────────────────────
 
@@ -882,8 +917,36 @@ final class RemiClient {
         let appName: String?
     }
 
+    struct HandoffResponse: Decodable {
+        let conversationId: String
+        let alreadySynced: Bool?
+    }
+
+    struct HandoffPayload: Encodable {
+        let interactionId: String
+        let response_so_far: String?
+
+        enum CodingKeys: String, CodingKey {
+            case interactionId
+            case response_so_far
+        }
+    }
+
+    struct ContextPayload: Encodable {
+        let interactionId: String
+        let prompt: String?
+        let response_so_far: String?
+
+        enum CodingKeys: String, CodingKey {
+            case interactionId
+            case prompt
+            case response_so_far
+        }
+    }
+
     private let baseURL = "http://localhost:3080"
     private var authToken: String?
+    private var contextUpdateWorkItem: DispatchWorkItem?
 
     func setToken(_ token: String) {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -959,6 +1022,7 @@ final class RemiClient {
 
     func send(
         query: String, llm: LLM, context: CursorContext,
+        sessionInteractionId: String,
         mergedContextText: String? = nil,
         screenshotCount: Int? = nil,
         additionalScreenshots: [Data] = [],
@@ -977,6 +1041,7 @@ final class RemiClient {
                     query: query,
                     llm: llm,
                     context: context,
+                    sessionInteractionId: sessionInteractionId,
                     mergedContextText: mergedContextText,
                     screenshotCount: screenshotCount,
                     additionalScreenshots: additionalScreenshots,
@@ -988,6 +1053,98 @@ final class RemiClient {
                 )
             }
         }
+    }
+
+    func scheduleContextUpdate(interactionId: String, prompt: String?, responseSoFar: String?) {
+        contextUpdateWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.updateContext(interactionId: interactionId, prompt: prompt, responseSoFar: responseSoFar)
+        }
+        contextUpdateWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+    }
+
+    func updateContext(interactionId: String, prompt: String?, responseSoFar: String?) {
+        guard !interactionId.isEmpty else { return }
+        resolveToken { [weak self] result in
+            guard let self, case .success(let token) = result else { return }
+            guard let url = URL(string: "\(self.baseURL)/api/remi/context") else { return }
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.httpBody = try? JSONEncoder().encode(
+                ContextPayload(
+                    interactionId: interactionId,
+                    prompt: prompt,
+                    response_so_far: responseSoFar
+                )
+            )
+            URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
+        }
+    }
+
+    func handoff(
+        interactionId: String,
+        responseSoFar: String? = nil,
+        completion: @escaping (Result<HandoffResponse, Error>) -> Void
+    ) {
+        resolveToken { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let err):
+                DispatchQueue.main.async { completion(.failure(err)) }
+            case .success(let token):
+                guard let url = URL(string: "\(self.baseURL)/api/remi/handoff") else {
+                    DispatchQueue.main.async { completion(.failure(URLError(.badURL))) }
+                    return
+                }
+                var req = URLRequest(url: url)
+                req.httpMethod = "POST"
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                let trimmedResponse = responseSoFar?.trimmingCharacters(in: .whitespacesAndNewlines)
+                req.httpBody = try? JSONEncoder().encode(
+                    HandoffPayload(
+                        interactionId: interactionId,
+                        response_so_far: (trimmedResponse?.isEmpty == false) ? trimmedResponse : nil
+                    )
+                )
+                URLSession.shared.dataTask(with: req) { data, response, error in
+                    if let error {
+                        DispatchQueue.main.async { completion(.failure(error)) }
+                        return
+                    }
+                    guard let http = response as? HTTPURLResponse else {
+                        DispatchQueue.main.async { completion(.failure(URLError(.badServerResponse))) }
+                        return
+                    }
+                    guard (200...299).contains(http.statusCode), let data else {
+                        let message = data.flatMap { RemiClient.parseErrorMessage(from: String(data: $0, encoding: .utf8) ?? "") }
+                            ?? "Handoff failed (\(http.statusCode))"
+                        DispatchQueue.main.async {
+                            completion(.failure(NSError(
+                                domain: "RemiClient",
+                                code: http.statusCode,
+                                userInfo: [NSLocalizedDescriptionKey: message]
+                            )))
+                        }
+                        return
+                    }
+                    do {
+                        let handoff = try JSONDecoder().decode(HandoffResponse.self, from: data)
+                        DispatchQueue.main.async { completion(.success(handoff)) }
+                    } catch {
+                        DispatchQueue.main.async { completion(.failure(error)) }
+                    }
+                }.resume()
+            }
+        }
+    }
+
+    static func openChat(conversationId: String) {
+        guard let url = URL(string: "\(Config.librechatWebURL)/c/\(conversationId)") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func resolveToken(completion: @escaping (Result<String, Error>) -> Void) {
@@ -1016,17 +1173,15 @@ final class RemiClient {
 
     private func performQuery(
         query: String, llm: LLM, context: CursorContext,
+        sessionInteractionId: String,
         mergedContextText: String?, screenshotCount: Int?, additionalScreenshots: [Data],
         agentId: String?, manualSkills: [String],
         token: String,
         onToken: @escaping (String) -> Void,
         onComplete: @escaping (Error?) -> Void
     ) {
-        guard let url = URL(string: "\(baseURL)/api/remi/query") else {
-            onComplete(URLError(.badURL))
-        guard let url = URL(string: "\(Config.remiBaseURL)/query"),
-              let token = RemiAuth.accessToken else {
-            DispatchQueue.main.async { onComplete(URLError(.userAuthenticationRequired)) }
+        guard let url = URL(string: "\(Config.remiBaseURL)/query") else {
+            DispatchQueue.main.async { onComplete(URLError(.badURL)) }
             return
         }
 
@@ -1046,7 +1201,7 @@ final class RemiClient {
 
         let skills = manualSkills.isEmpty ? nil : manualSkills
         let payload = Payload(
-            interactionId: context.interactionId,
+            interactionId: sessionInteractionId,
             query: query,
             llm: llm.rawValue,
             captureMode: selRect != nil ? "selection" : "cursor",
@@ -1081,76 +1236,6 @@ final class RemiClient {
         req.httpBody = bodyData
         req.timeoutInterval = 120
 
-        URLSession.shared.dataTask(with: req) { data, response, error in
-            if let e = error {
-                DispatchQueue.main.async { onComplete(e) }
-                return
-            }
-            guard let http = response as? HTTPURLResponse else {
-                DispatchQueue.main.async { onComplete(URLError(.badServerResponse)) }
-                return
-            }
-            let text = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-
-            if http.statusCode == 401 {
-                self.authToken = nil
-                RemiAuth.clearSession()
-                DispatchQueue.main.async {
-                    onComplete(NSError(
-                        domain: "RemiClient",
-                        code: 401,
-                        userInfo: [NSLocalizedDescriptionKey: "Session expired — please log in again"]
-                    ))
-                }
-                return
-            }
-
-            guard (200...299).contains(http.statusCode) else {
-                let msg = Self.parseErrorMessage(from: text)
-                    ?? "Request failed (HTTP \(http.statusCode))"
-                DispatchQueue.main.async {
-                    onComplete(NSError(
-                        domain: "RemiClient",
-                        code: http.statusCode,
-                        userInfo: [NSLocalizedDescriptionKey: msg]
-                    ))
-                }
-                return
-            }
-
-            var tokenCount = 0
-            var streamError: Error?
-            for line in text.components(separatedBy: "\n") {
-                guard line.hasPrefix("data: ") else { continue }
-                let ssePayload = String(line.dropFirst(6))
-                if ssePayload == "[DONE]" { break }
-                if ssePayload.hasPrefix("[ERROR]") {
-                    let msg = String(ssePayload.dropFirst(7)).trimmingCharacters(in: .whitespaces)
-                    streamError = NSError(
-                        domain: "RemiClient",
-                        code: 500,
-                        userInfo: [NSLocalizedDescriptionKey: msg.isEmpty ? "Inference failed" : msg]
-                    )
-                    break
-                }
-                tokenCount += 1
-                DispatchQueue.main.async { onToken(ssePayload) }
-            }
-
-            DispatchQueue.main.async {
-                if let streamError {
-                    onComplete(streamError)
-                } else if tokenCount == 0 {
-                    onComplete(NSError(
-                        domain: "RemiClient",
-                        code: 0,
-                        userInfo: [NSLocalizedDescriptionKey: "No response from the model. Try fewer snapshots or a different model."]
-                    ))
-                } else {
-                    onComplete(nil)
-                }
-            }
-        }.resume()
         streamHandler.configure(onToken: onToken, onComplete: { [weak self] error in
             self?.activeStreamTask = nil
             onComplete(error)
@@ -1488,29 +1573,288 @@ final class OverlayResizeHandle: NSView {
 }
 
 // ─────────────────────────────────────────────
+// MARK: — Context inspector (popover)
+// ─────────────────────────────────────────────
+
+private enum ContextCaptureFormatting {
+    static func chipLabel(for context: CursorContext, index: Int) -> String {
+        let base: String
+        if let hover = context.hoveredText?.trimmingCharacters(in: .whitespacesAndNewlines), !hover.isEmpty {
+            let flat = hover.replacingOccurrences(of: "\n", with: " ")
+            base = String(flat.prefix(48))
+        } else if let app = context.appName, !app.isEmpty {
+            base = app
+        } else {
+            switch context.source {
+            case .selection(let r):
+                base = "\(Int(r.width))×\(Int(r.height))"
+            case .cursor:
+                base = "Screen"
+            }
+        }
+        return "#\(index + 1) \(base)"
+    }
+
+    static func metadataLine(for context: CursorContext) -> String {
+        var parts: [String] = []
+        if let app = context.appName, !app.isEmpty { parts.append(app) }
+        switch context.source {
+        case .cursor:
+            parts.append("Cursor capture")
+        case .selection(let r):
+            parts.append("Selection \(Int(r.width))×\(Int(r.height))")
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+private final class ContextCaptureRowView: NSView {
+    private let headerLabel = NSTextField(labelWithString: "")
+    private let metaLabel = NSTextField(labelWithString: "")
+    private let imageView = NSImageView()
+    private let textView = NSTextView()
+    private let scrollView = NSScrollView()
+    private var imageHeightConstraint: CGFloat = 120
+
+    init(context: CursorContext, index: Int, width: CGFloat) {
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 80))
+        headerLabel.stringValue = ContextCaptureFormatting.chipLabel(for: context, index: index)
+        headerLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        headerLabel.textColor = .white.withAlphaComponent(0.92)
+        addSubview(headerLabel)
+
+        metaLabel.stringValue = ContextCaptureFormatting.metadataLine(for: context)
+        metaLabel.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        metaLabel.textColor = .white.withAlphaComponent(0.62)
+        addSubview(metaLabel)
+
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        imageView.wantsLayer = true
+        imageView.layer?.cornerRadius = 6
+        imageView.layer?.masksToBounds = true
+        imageView.layer?.borderWidth = 1
+        imageView.layer?.borderColor = NSColor.white.withAlphaComponent(0.15).cgColor
+        if let data = context.screenshotData, let img = NSImage(data: data) {
+            imageView.image = img
+            let aspect = img.size.height / max(img.size.width, 1)
+            imageHeightConstraint = min(200, max(72, width * aspect))
+        } else {
+            imageView.image = nil
+            imageHeightConstraint = 0
+        }
+        addSubview(imageView)
+
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.autohidesScrollers = true
+        addSubview(scrollView)
+
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.drawsBackground = false
+        textView.textColor = .white.withAlphaComponent(0.86)
+        textView.font = NSFont.systemFont(ofSize: 11)
+        textView.textContainerInset = NSSize(width: 4, height: 4)
+        textView.textContainer?.widthTracksTextView = true
+        if let hover = context.hoveredText?.trimmingCharacters(in: .whitespacesAndNewlines), !hover.isEmpty {
+            textView.string = hover
+        } else {
+            textView.string = "No text captured for this snapshot."
+        }
+        scrollView.documentView = textView
+
+        layoutSubtree(width: width)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func layoutSubtree(width: CGFloat) {
+        var y = bounds.height
+        let pad: CGFloat = 8
+        let textBlockH: CGFloat = 72
+
+        y -= textBlockH
+        scrollView.frame = NSRect(x: pad, y: y, width: width - pad * 2, height: textBlockH)
+
+        if imageHeightConstraint > 0 {
+            y -= 6
+            y -= imageHeightConstraint
+            imageView.frame = NSRect(x: pad, y: y, width: width - pad * 2, height: imageHeightConstraint)
+            imageView.isHidden = false
+        } else {
+            imageView.isHidden = true
+        }
+
+        y -= 18
+        metaLabel.frame = NSRect(x: pad, y: y, width: width - pad * 2, height: 14)
+        y -= 18
+        headerLabel.frame = NSRect(x: pad, y: y, width: width - pad * 2, height: 16)
+    }
+
+    static func preferredHeight(for context: CursorContext, width: CGFloat) -> CGFloat {
+        let hasImage = context.screenshotData != nil
+        let imgH: CGFloat
+        if hasImage, let data = context.screenshotData, let img = NSImage(data: data) {
+            let aspect = img.size.height / max(img.size.width, 1)
+            imgH = min(200, max(72, width * aspect)) + 6
+        } else {
+            imgH = 0
+        }
+        return 8 + 16 + 14 + imgH + 72 + 12
+    }
+}
+
+private final class ContextInspectorViewController: NSViewController {
+    private let scrollView = NSScrollView()
+    private let stackView = NSView()
+    private let emptyLabel = NSTextField(labelWithString: "")
+
+    override func loadView() {
+        view = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 280))
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.82).cgColor
+        view.layer?.cornerRadius = 10
+        view.layer?.masksToBounds = true
+
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.autohidesScrollers = true
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(scrollView)
+
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = stackView
+
+        emptyLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        emptyLabel.textColor = .white.withAlphaComponent(0.72)
+        emptyLabel.alignment = .center
+        emptyLabel.maximumNumberOfLines = 3
+        emptyLabel.lineBreakMode = .byWordWrapping
+
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 4),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -4),
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor, constant: 8),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -8),
+        ])
+    }
+
+    func setContexts(_ contexts: [CursorContext]) {
+        stackView.subviews.forEach { $0.removeFromSuperview() }
+        let width = max(280, view.bounds.width - 16)
+        guard !contexts.isEmpty else {
+            emptyLabel.stringValue = "\(Config.contextCaptureHint) adds a screen snapshot · ⌘C pastes clipboard text"
+            emptyLabel.frame = NSRect(x: 12, y: 80, width: width, height: 48)
+            stackView.addSubview(emptyLabel)
+            stackView.frame = NSRect(x: 0, y: 0, width: width + 16, height: 140)
+            return
+        }
+
+        var y: CGFloat = 0
+        for (idx, ctx) in contexts.enumerated() {
+            let rowH = ContextCaptureRowView.preferredHeight(for: ctx, width: width)
+            let row = ContextCaptureRowView(context: ctx, index: idx, width: width)
+            row.frame = NSRect(x: 8, y: y, width: width, height: rowH)
+            stackView.addSubview(row)
+            y += rowH + 8
+        }
+        stackView.frame = NSRect(x: 0, y: 0, width: width + 16, height: max(y, 120))
+    }
+}
+
+private final class ContextInspectorController: NSObject, NSPopoverDelegate {
+    private let popover: NSPopover
+    private let inspectorVC: ContextInspectorViewController
+
+    override init() {
+        popover = NSPopover()
+        inspectorVC = ContextInspectorViewController()
+        super.init()
+        popover.contentViewController = inspectorVC
+        popover.behavior = .semitransient
+        popover.animates = true
+        popover.delegate = self
+    }
+
+    var isShown: Bool { popover.isShown }
+
+    func show(relativeTo positioningRect: NSRect, of positioningView: NSView, contexts: [CursorContext]) {
+        inspectorVC.setContexts(contexts)
+        let count = max(contexts.count, 1)
+        let height = min(420, max(160, CGFloat(count) * 140))
+        inspectorVC.view.setFrameSize(NSSize(width: 360, height: height))
+        popover.show(relativeTo: positioningRect, of: positioningView, preferredEdge: .maxY)
+    }
+
+    func refresh(contexts: [CursorContext]) {
+        guard isShown else { return }
+        inspectorVC.setContexts(contexts)
+    }
+
+    func close() {
+        popover.performClose(nil)
+    }
+}
+
+private final class TrafficLightButton: NSButton {
+    enum Kind { case close, minimize }
+
+    init(kind: Kind) {
+        super.init(frame: .zero)
+        bezelStyle = .inline
+        isBordered = false
+        wantsLayer = true
+        layer?.cornerRadius = OverlayLayout.trafficLightSize / 2
+        switch kind {
+        case .close:
+            layer?.backgroundColor = NSColor(red: 1, green: 0.38, blue: 0.35, alpha: 1).cgColor
+            toolTip = "Close overlay (Esc)"
+        case .minimize:
+            layer?.backgroundColor = NSColor(red: 1, green: 0.74, blue: 0.18, alpha: 1).cgColor
+            toolTip = "Minimize panel"
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: OverlayLayout.trafficLightSize, height: OverlayLayout.trafficLightSize)
+    }
+}
+
+// ─────────────────────────────────────────────
 // MARK: — Overlay View Controller
 // ─────────────────────────────────────────────
 
 final class OverlayViewController: NSViewController {
     private let glowView = GlowBorderView()
-    private let container     = DraggableVisualEffectView()
-    private let llmPicker = NSSegmentedControl()
-    fileprivate let textField = NSTextField()
-    private let responseLabel = NSTextField()
-    private let modeLabel     = NSTextField()
-    private let hotkeyHint    = NSTextField()
     private let container = DraggableVisualEffectView()
+    private let titleBar = NSView()
+    private let closeTrafficButton = TrafficLightButton(kind: .close)
+    private let minimizeTrafficButton = TrafficLightButton(kind: .minimize)
     private let llmPicker = NSSegmentedControl()
     private let remiSprite = RemiSpriteView()
-    private let textField = NSTextField()
+    fileprivate let textField = NSTextField()
+    private let contextPillButton = NSButton()
+    private let contextBadgeLabel = NSTextField(labelWithString: "0")
     private let contextLabel = NSTextField()
     private let responseScrollView = NSScrollView()
     private let responseTextView = NSTextView()
     private let modeLabel = NSTextField()
     private let hotkeyHint = NSTextField()
-    private let minimizeButton = NSButton()
     private let resizeHandle = OverlayResizeHandle()
     private let separator = NSBox()
+    private let openInChatButton = NSButton()
+    private let complexityNudgeContainer = NSView()
+    private let complexityNudgeLabel = NSTextField()
+    private let complexityNudgeOpenButton = NSButton()
+    private let complexityNudgeDismissButton = NSButton()
+    private var showsComplexityNudge = false
+    private var contextSnapshotCount = 0
 
     private var isStreamingResponse = false
     private var streamedCharCount = 0
@@ -1524,6 +1868,12 @@ final class OverlayViewController: NSViewController {
     var onTextChanged: ((String) -> Void)?
     var onHeightChange: ((CGFloat) -> Void)?
     var onWidthChange: ((CGFloat) -> Void)?
+    var onOpenInChat: (() -> Void)?
+    var onDismissComplexityNudge: (() -> Void)?
+    var onContextInspect: (() -> Void)?
+    var onCloseOverlay: (() -> Void)?
+
+    var responseTranscript: String { responseTextView.string }
 
     override func loadView() {
         view = NSView(frame: NSRect(x: 0, y: 0,
@@ -1557,13 +1907,25 @@ final class OverlayViewController: NSViewController {
         container.layer?.borderColor = NSColor.white.withAlphaComponent(0.22).cgColor
         view.addSubview(container)
 
+        titleBar.wantsLayer = true
+        titleBar.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
+        container.addSubview(titleBar)
+
+        closeTrafficButton.target = self
+        closeTrafficButton.action = #selector(closeOverlayPressed)
+        titleBar.addSubview(closeTrafficButton)
+
+        minimizeTrafficButton.target = self
+        minimizeTrafficButton.action = #selector(toggleCollapsed)
+        titleBar.addSubview(minimizeTrafficButton)
+
         modeLabel.isEditable = false
         modeLabel.isBordered = false
         modeLabel.backgroundColor = .clear
-        modeLabel.textColor = .white.withAlphaComponent(0.88)
-        modeLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        modeLabel.stringValue = "MagicPointer · cursor"
-        container.addSubview(modeLabel)
+        modeLabel.textColor = .white.withAlphaComponent(0.92)
+        modeLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        modeLabel.stringValue = "REMi · cursor"
+        titleBar.addSubview(modeLabel)
 
         hotkeyHint.isEditable = false
         hotkeyHint.isBordered = false
@@ -1571,18 +1933,8 @@ final class OverlayViewController: NSViewController {
         hotkeyHint.textColor = .white.withAlphaComponent(0.75)
         hotkeyHint.font = NSFont.systemFont(ofSize: 10)
         hotkeyHint.alignment = .right
-        hotkeyHint.stringValue = "@ agent  ·  / skill  ·  Shift: context"
         hotkeyHint.stringValue = "Esc · Context 0"
-        container.addSubview(hotkeyHint)
-
-        minimizeButton.bezelStyle = .inline
-        minimizeButton.isBordered = false
-        minimizeButton.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        minimizeButton.contentTintColor = .white.withAlphaComponent(0.85)
-        minimizeButton.target = self
-        minimizeButton.action = #selector(toggleCollapsed)
-        minimizeButton.toolTip = "Minimize panel"
-        container.addSubview(minimizeButton)
+        titleBar.addSubview(hotkeyHint)
 
         resizeHandle.targetWindow = view.window
         resizeHandle.onResizeEnded = { [weak self] in
@@ -1626,7 +1978,26 @@ final class OverlayViewController: NSViewController {
         contextLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         contextLabel.lineBreakMode = .byTruncatingTail
         contextLabel.cell?.truncatesLastVisibleLine = true
-        contextLabel.stringValue = "Shift+Click to add context, or press ⌘C to add copied text."
+        contextPillButton.title = "Context"
+        contextPillButton.bezelStyle = .rounded
+        contextPillButton.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        contextPillButton.target = self
+        contextPillButton.action = #selector(contextPillPressed)
+        contextPillButton.toolTip = "View attached snapshots and text"
+        contextPillButton.isEnabled = false
+        container.addSubview(contextPillButton)
+
+        contextBadgeLabel.font = NSFont.systemFont(ofSize: 9, weight: .bold)
+        contextBadgeLabel.textColor = .white
+        contextBadgeLabel.alignment = .center
+        contextBadgeLabel.drawsBackground = true
+        contextBadgeLabel.backgroundColor = NSColor.white.withAlphaComponent(0.22)
+        contextBadgeLabel.wantsLayer = true
+        contextBadgeLabel.layer?.cornerRadius = 7
+        contextBadgeLabel.isHidden = true
+        container.addSubview(contextBadgeLabel)
+
+        contextLabel.stringValue = "\(Config.contextCaptureHint) to add context, or ⌘C for clipboard."
         container.addSubview(contextLabel)
 
         responseScrollView.hasVerticalScroller = true
@@ -1645,6 +2016,104 @@ final class OverlayViewController: NSViewController {
         responseTextView.string = ""
         responseScrollView.documentView = responseTextView
         responseScrollView.isHidden = true
+
+        openInChatButton.title = "Open in chat"
+        openInChatButton.bezelStyle = .rounded
+        openInChatButton.isEnabled = false
+        openInChatButton.alphaValue = 0.45
+        openInChatButton.target = self
+        openInChatButton.action = #selector(openInChatPressed)
+        openInChatButton.toolTip = "Continue in LibreChat (⌘⇧O)"
+        container.addSubview(openInChatButton)
+
+        complexityNudgeContainer.isHidden = true
+        complexityNudgeContainer.wantsLayer = true
+        complexityNudgeContainer.layer?.cornerRadius = 8
+        complexityNudgeContainer.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
+        container.addSubview(complexityNudgeContainer)
+
+        complexityNudgeLabel.isEditable = false
+        complexityNudgeLabel.isBordered = false
+        complexityNudgeLabel.drawsBackground = false
+        complexityNudgeLabel.textColor = .white.withAlphaComponent(0.88)
+        complexityNudgeLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        complexityNudgeLabel.stringValue = "This looks involved — open in chat to continue"
+        complexityNudgeLabel.lineBreakMode = .byWordWrapping
+        complexityNudgeLabel.maximumNumberOfLines = 2
+        complexityNudgeContainer.addSubview(complexityNudgeLabel)
+
+        complexityNudgeOpenButton.title = "Open in chat"
+        complexityNudgeOpenButton.bezelStyle = .rounded
+        complexityNudgeOpenButton.target = self
+        complexityNudgeOpenButton.action = #selector(openInChatPressed)
+        complexityNudgeContainer.addSubview(complexityNudgeOpenButton)
+
+        complexityNudgeDismissButton.title = "Dismiss"
+        complexityNudgeDismissButton.bezelStyle = .rounded
+        complexityNudgeDismissButton.target = self
+        complexityNudgeDismissButton.action = #selector(dismissNudgePressed)
+        complexityNudgeContainer.addSubview(complexityNudgeDismissButton)
+    }
+
+    @objc private func openInChatPressed() {
+        onOpenInChat?()
+    }
+
+    @objc private func closeOverlayPressed() {
+        onCloseOverlay?()
+    }
+
+    @objc private func contextPillPressed() {
+        onContextInspect?()
+    }
+
+    func contextPillFrameForPopover() -> NSRect {
+        contextPillButton.convert(contextPillButton.bounds, to: view)
+    }
+
+    func updateContextPill(snapshotCount: Int, chipPreview: String?) {
+        contextSnapshotCount = snapshotCount
+        contextPillButton.isEnabled = snapshotCount > 0
+        contextBadgeLabel.isHidden = snapshotCount <= 0
+        contextBadgeLabel.stringValue = "\(snapshotCount)"
+        if let chipPreview, !chipPreview.isEmpty {
+            contextLabel.stringValue = chipPreview
+            contextLabel.textColor = .white.withAlphaComponent(0.86)
+        } else if snapshotCount == 0 {
+            contextLabel.stringValue = "\(Config.contextCaptureHint) adds a screen snapshot · ⌘C pastes clipboard text"
+            contextLabel.textColor = .white.withAlphaComponent(0.78)
+        } else {
+            contextLabel.stringValue = "\(snapshotCount) snapshot\(snapshotCount == 1 ? "" : "s") attached"
+            contextLabel.textColor = .white.withAlphaComponent(0.86)
+        }
+    }
+
+    @objc private func dismissNudgePressed() {
+        showComplexityNudge(false)
+        onDismissComplexityNudge?()
+    }
+
+    func updateHandoffChrome(enabled: Bool, title: String, inFlight: Bool) {
+        openInChatButton.title = title
+        openInChatButton.isEnabled = enabled && !inFlight
+        openInChatButton.alphaValue = (enabled && !inFlight) ? 1 : 0.45
+    }
+
+    func showComplexityNudge(_ show: Bool) {
+        showsComplexityNudge = show
+        complexityNudgeContainer.isHidden = !show
+        applyLayout(collapsed: isCollapsed)
+        if !userManualLayout, !isCollapsed {
+            updateOverlayHeightForContent()
+        }
+    }
+
+    private func footerChromeHeight() -> CGFloat {
+        var height = OverlayLayout.handoffRowH + OverlayLayout.rowGap
+        if showsComplexityNudge {
+            height += OverlayLayout.nudgeRowH + OverlayLayout.rowGap
+        }
+        return height
     }
 
     private var showsResponseArea: Bool {
@@ -1653,24 +2122,42 @@ final class OverlayViewController: NSViewController {
 
     private func relayoutChrome(panelSize: NSSize, innerHeight: CGFloat, collapsed: Bool) {
         let innerW = panelSize.width - OverlayLayout.containerInset
-        let controlsRight = innerW - 10
-        let headerY = innerHeight - OverlayLayout.topInset - OverlayLayout.headerH
+        let titleBarY = innerHeight - OverlayLayout.topInset - OverlayLayout.titleBarH
 
-        minimizeButton.frame = NSRect(x: controlsRight - 52, y: headerY + 2, width: 22, height: 20)
-        hotkeyHint.frame = NSRect(x: controlsRight - 196, y: headerY + 4, width: 136, height: 16)
+        titleBar.frame = NSRect(
+            x: 0, y: titleBarY,
+            width: innerW, height: OverlayLayout.titleBarH
+        )
+        let lightY = (OverlayLayout.titleBarH - OverlayLayout.trafficLightSize) / 2
+        closeTrafficButton.frame = NSRect(
+            x: OverlayLayout.margin, y: lightY,
+            width: OverlayLayout.trafficLightSize, height: OverlayLayout.trafficLightSize
+        )
+        minimizeTrafficButton.frame = NSRect(
+            x: OverlayLayout.margin + OverlayLayout.trafficLightSize + OverlayLayout.trafficLightGap,
+            y: lightY,
+            width: OverlayLayout.trafficLightSize, height: OverlayLayout.trafficLightSize
+        )
+        let titleX = OverlayLayout.margin + (OverlayLayout.trafficLightSize + OverlayLayout.trafficLightGap) * 2 + 8
+        hotkeyHint.frame = NSRect(x: innerW - 148, y: 6, width: 136, height: 16)
         modeLabel.frame = NSRect(
-            x: OverlayLayout.margin, y: headerY + 4,
-            width: max(120, innerW - 220), height: 16
+            x: titleX, y: 6,
+            width: max(80, innerW - titleX - 156), height: 16
         )
         resizeHandle.frame = NSRect(x: innerW - 22, y: 4, width: 18, height: 18)
 
         let showBody = !collapsed
+        titleBar.isHidden = false
         llmPicker.isHidden = !showBody
         textField.isHidden = !showBody
         separator.isHidden = !showBody
+        contextPillButton.isHidden = !showBody || showsResponseArea
+        contextBadgeLabel.isHidden = !showBody || showsResponseArea || contextSnapshotCount <= 0
         contextLabel.isHidden = !showBody || showsResponseArea
         remiSprite.isHidden = !showBody || showsResponseArea
         responseScrollView.isHidden = !showBody || !showsResponseArea
+        openInChatButton.isHidden = !showBody
+        complexityNudgeContainer.isHidden = !showBody || !showsComplexityNudge
         resizeHandle.isHidden = collapsed
 
         guard showBody else { return }
@@ -1680,7 +2167,7 @@ final class OverlayViewController: NSViewController {
             return
         }
 
-        var y = headerY - OverlayLayout.rowGap
+        var y = titleBarY - OverlayLayout.rowGap
 
         let pickerW = innerW - OverlayLayout.margin * 2
         y -= OverlayLayout.pickerH
@@ -1717,14 +2204,35 @@ final class OverlayViewController: NSViewController {
         )
         y -= OverlayLayout.rowGap
 
-        let responseY = OverlayLayout.bottomPad
+        var bottomY = OverlayLayout.bottomPad
+        openInChatButton.frame = NSRect(
+            x: OverlayLayout.margin,
+            y: bottomY,
+            width: innerW - OverlayLayout.margin * 2,
+            height: OverlayLayout.handoffRowH
+        )
+        bottomY += OverlayLayout.handoffRowH + OverlayLayout.rowGap
+
+        if showsComplexityNudge {
+            let nudgeW = innerW - OverlayLayout.margin * 2
+            complexityNudgeContainer.frame = NSRect(
+                x: OverlayLayout.margin,
+                y: bottomY,
+                width: nudgeW,
+                height: OverlayLayout.nudgeRowH
+            )
+            complexityNudgeLabel.frame = NSRect(x: 8, y: 26, width: nudgeW - 16, height: 22)
+            complexityNudgeOpenButton.frame = NSRect(x: 8, y: 4, width: 96, height: 20)
+            complexityNudgeDismissButton.frame = NSRect(x: 110, y: 4, width: 72, height: 20)
+            bottomY += OverlayLayout.nudgeRowH + OverlayLayout.rowGap
+        }
 
         if showsResponseArea {
-            let available = max(0, y - responseY)
+            let available = max(0, y - bottomY)
             let responseH = max(OverlayLayout.minimumResponseHeight, available)
             responseScrollView.frame = NSRect(
                 x: OverlayLayout.margin,
-                y: responseY,
+                y: bottomY,
                 width: innerW - OverlayLayout.margin * 2,
                 height: responseH
             )
@@ -1733,10 +2241,23 @@ final class OverlayViewController: NSViewController {
             }
         } else {
             let contextY = y - OverlayLayout.contextRowH
-            contextLabel.frame = NSRect(
+            contextPillButton.frame = NSRect(
                 x: OverlayLayout.margin,
+                y: contextY + 4,
+                width: OverlayLayout.contextPillW,
+                height: 24
+            )
+            contextBadgeLabel.frame = NSRect(
+                x: OverlayLayout.margin + OverlayLayout.contextPillW - 18,
+                y: contextY + 14,
+                width: 16,
+                height: 14
+            )
+            let labelX = OverlayLayout.margin + OverlayLayout.contextPillW + 8
+            contextLabel.frame = NSRect(
+                x: labelX,
                 y: contextY + 8,
-                width: max(60, innerW - OverlayLayout.margin * 2),
+                width: max(40, innerW - labelX - OverlayLayout.margin),
                 height: 16
             )
         }
@@ -1797,8 +2318,7 @@ final class OverlayViewController: NSViewController {
         guard !isCollapsed else { return }
         expandedSize = view.bounds.size
         isCollapsed = true
-        minimizeButton.title = "+"
-        minimizeButton.toolTip = "Restore panel"
+        minimizeTrafficButton.toolTip = "Restore panel"
         onHeightChange?(Config.overlayCollapsedHeight)
         applyLayout(collapsed: true)
     }
@@ -1806,8 +2326,7 @@ final class OverlayViewController: NSViewController {
     func expand() {
         guard isCollapsed else { return }
         isCollapsed = false
-        minimizeButton.title = "−"
-        minimizeButton.toolTip = "Minimize panel"
+        minimizeTrafficButton.toolTip = "Minimize panel"
         let target = expandedSize ?? NSSize(width: Config.overlayWidth, height: Config.overlayMinHeight)
         onHeightChange?(target.height)
         onWidthChange?(target.width)
@@ -1835,7 +2354,12 @@ final class OverlayViewController: NSViewController {
         layout.ensureLayout(for: container)
         let used = layout.usedRect(for: container).height
         let responseBlock = min(152, max(OverlayLayout.minimumResponseHeight, used + 18))
-        setOverlayHeight(OverlayLayout.minimumPanelHeight + max(0, responseBlock - OverlayLayout.minimumResponseHeight))
+        let nudgeExtra = showsComplexityNudge ? (OverlayLayout.nudgeRowH + OverlayLayout.rowGap) : 0
+        setOverlayHeight(
+            OverlayLayout.minimumPanelHeight
+                + max(0, responseBlock - OverlayLayout.minimumResponseHeight)
+                + nudgeExtra
+        )
     }
 
     private func setChromeDimmed(_ dimmed: Bool) {
@@ -1843,7 +2367,8 @@ final class OverlayViewController: NSViewController {
         llmPicker.alphaValue = alpha
         textField.alphaValue = alpha
         contextLabel.alphaValue = alpha
-        modeLabel.alphaValue = dimmed ? 0.7 : 0.88
+        contextPillButton.alphaValue = alpha
+        modeLabel.alphaValue = dimmed ? 0.7 : 0.92
     }
 
     @objc private func pickerChanged() {
@@ -1868,8 +2393,25 @@ final class OverlayViewController: NSViewController {
         mergedTexts: String?,
         screenshotCount: Int
     ) {
-        textField.stringValue = ""; responseLabel.stringValue = ""
+        isStreamingResponse = false
+        streamedCharCount = 0
+        userManualLayout = false
+        isCollapsed = false
+        expandedSize = nil
+        minimizeTrafficButton.toolTip = "Minimize panel"
+        glowView.setStreaming(false)
+        remiSprite.setStreaming(false)
+        remiSprite.startIdle()
+        setChromeDimmed(false)
+        textField.stringValue = ""
+        responseTextView.string = ""
+        contextLabel.stringValue = "\(Config.contextCaptureHint) to add context, or ⌘C for clipboard."
+        contextLabel.textColor = .white.withAlphaComponent(0.78)
+        onHeightChange?(OverlayLayout.minimumPanelHeight)
+        onWidthChange?(Config.overlayWidth)
+        applyLayout(collapsed: false)
         updateLLM(llm)
+
         let pageSummary = extractedPageSummary(from: context.hoveredText)
         let prefix = "#\(interactionNumber)  ·  "
         let snapshotSuffix = screenshotCount > 0 ? "  ·  \(screenshotCount) snapshots" : ""
@@ -1888,33 +2430,9 @@ final class OverlayViewController: NSViewController {
             } else if let t = context.hoveredText, !t.isEmpty {
                 let summary = "\(String(t.prefix(80)))\(t.count > 80 ? "…" : "")"
                 textField.placeholderString = "About: \(summary)"
-    func reset(context: CursorContext, llm: LLM) {
-        isStreamingResponse = false
-        streamedCharCount = 0
-        userManualLayout = false
-        isCollapsed = false
-        expandedSize = nil
-        minimizeButton.title = "−"
-        glowView.setStreaming(false)
-        remiSprite.setStreaming(false)
-        remiSprite.startIdle()
-        setChromeDimmed(false)
-        textField.stringValue = ""
-        responseTextView.string = ""
-        contextLabel.stringValue = "Shift+Click to add context, or press ⌘C to add copied text."
-        contextLabel.textColor = .white.withAlphaComponent(0.78)
-        onHeightChange?(OverlayLayout.minimumPanelHeight)
-        onWidthChange?(Config.overlayWidth)
-        applyLayout(collapsed: false)
-        updateLLM(llm)
-
-        switch context.source {
-        case .cursor:
-            modeLabel.stringValue = "MagicPointer · cursor"
-            if let app = context.appName, !app.isEmpty {
-                textField.placeholderString = "Ask about \(app)…"
             } else {
-                textField.placeholderString = "Ask about what's under your cursor…"
+                textField.placeholderString = context.appName.map { "Ask about \($0)…" }
+                    ?? "Ask about what's under your cursor…"
             }
         case .selection(let rect):
             modeLabel.stringValue = pageSummary == nil
@@ -1940,9 +2458,8 @@ final class OverlayViewController: NSViewController {
                 let val = String(trimmed.dropFirst("Page: ".count)).trimmingCharacters(in: .whitespaces)
                 return val.isEmpty ? nil : val
             }
-            modeLabel.stringValue = "MagicPointer · \(Int(rect.width))×\(Int(rect.height))"
-            textField.placeholderString = "Ask about the selected region…"
         }
+        return nil
     }
 
     func focus() { view.window?.makeFirstResponder(textField) }
@@ -1955,7 +2472,7 @@ final class OverlayViewController: NSViewController {
             contextLabel.stringValue = "Captured #\(contextCount): \(text)\(latest.count > 72 ? "…" : "")"
             contextLabel.textColor = .white.withAlphaComponent(0.86)
         } else {
-            contextLabel.stringValue = "Shift+Click to add context, or press ⌘C to add copied text."
+            contextLabel.stringValue = "\(Config.contextCaptureHint) to add context, or ⌘C for clipboard."
             contextLabel.textColor = .white.withAlphaComponent(0.78)
         }
         applyLayout(collapsed: isCollapsed)
@@ -1967,6 +2484,7 @@ final class OverlayViewController: NSViewController {
         glowView.setStreaming(true)
         remiSprite.setStreaming(true)
         setChromeDimmed(true)
+        textField.isEditable = false
         responseTextView.string = ""
         responseTextView.textColor = .white.withAlphaComponent(0.9)
         applyLayout(collapsed: isCollapsed)
@@ -1977,8 +2495,6 @@ final class OverlayViewController: NSViewController {
             responseTextView.string = token
             applyLayout(collapsed: isCollapsed)
         } else {
-            responseLabel.stringValue = "Hover, then Shift to add context. ⌘C for clipboard."
-            responseLabel.textColor = .white.withAlphaComponent(0.78)
             responseTextView.string += token
         }
         streamedCharCount += token.count
@@ -1988,14 +2504,15 @@ final class OverlayViewController: NSViewController {
     }
 
     func updateHoverPreview(_ text: String?) {
+        guard !isStreamingResponse else { return }
         if let text, !text.isEmpty {
             let flat = text.replacingOccurrences(of: "\n", with: " ")
             let preview = String(flat.prefix(72))
-            responseLabel.stringValue = "Hovering: \(preview)\(flat.count > 72 ? "…" : "")"
+            contextLabel.stringValue = "Hovering: \(preview)\(flat.count > 72 ? "…" : "")"
         } else {
-            responseLabel.stringValue = "Hovering: (no text detected)"
+            contextLabel.stringValue = "Hovering: (no text detected)"
         }
-        responseLabel.textColor = .white.withAlphaComponent(0.78)
+        contextLabel.textColor = .white.withAlphaComponent(0.78)
     }
 
     func updateSnapshotHeader(
@@ -2020,20 +2537,6 @@ final class OverlayViewController: NSViewController {
         }
     }
 
-    func showLoading() {
-        textField.isEditable = false
-        responseLabel.stringValue = ""
-        responseLabel.textColor = .tertiaryLabelColor
-    }
-    func appendToken(_ t: String)   { responseLabel.stringValue += t; responseLabel.textColor = .labelColor }
-    func finishResponse(error: Error?) {
-        if let e = error {
-            responseLabel.stringValue = "Error: \(e.localizedDescription)"
-            responseLabel.textColor = .systemRed
-        }
-        textField.isEditable = true
-        textField.stringValue = ""
-        textField.window?.makeFirstResponder(textField)
     func finishResponse(error: Error?) {
         isStreamingResponse = false
         glowView.setStreaming(false)
@@ -2044,6 +2547,9 @@ final class OverlayViewController: NSViewController {
             responseTextView.string = "Error: \(error.localizedDescription)"
             responseTextView.textColor = .systemRed
         }
+        textField.isEditable = true
+        textField.stringValue = ""
+        textField.window?.makeFirstResponder(textField)
         applyLayout(collapsed: isCollapsed)
         updateOverlayHeightForContent()
     }
@@ -2083,21 +2589,31 @@ final class OverlayWindowController: NSWindowController, NSWindowDelegate {
     private var copyKeyLocalMonitor: Any?
     private var copyKeyGlobalMonitor: Any?
     private var lastClipboardString: String?
-    private var capturedContextSnippets: [String] = []
     private var sessionContexts: [CursorContext] = []
     private var mergedContextText: String?
     private var screenshotCount: Int = 0
     private var additionalScreenshots: [Data] = []
     private var storedInteractionNumber: Int = 0
+    private var sessionInteractionId: String = ""
+    private var conversationId: String?
+    private var hasSubmittedQuery = false
+    private var nudgeDismissed = false
+    private var turnCount = 0
+    private var lastQueryUsedAgentOrSkill = false
+    private var isHandoffInFlight = false
+    private var lastSubmittedQuery: String = ""
     private var lastHoverPreviewTime = Date.distantPast
     private var showingCaptureStatus = false
+    private let contextInspector = ContextInspectorController()
     private var catalog: RemiCatalog?
     private(set) var selectedAgentId: String?
     private(set) var selectedSkillNames: [String] = []
     var hoverPreviewProvider: ((CGPoint) -> String?)?
+    var onOptionClickCapture: ((CGPoint) -> Void)?
     var onLLMChange: ((LLM) -> Void)?
 
     var sessionContextCount: Int { sessionContexts.count }
+    var currentPrimaryContext: CursorContext? { sessionContexts.last }
 
     init() {
         let panel = OverlayPanel(
@@ -2120,6 +2636,112 @@ final class OverlayWindowController: NSWindowController, NSWindowDelegate {
         vc.view.autoresizingMask = [.width, .height]
         vc.onLLMChange = { [weak self] llm in self?.onLLMChange?(llm) }
         vc.onTextChanged = { [weak self] text in self?.handleCommandTextChange(text) }
+        vc.onOpenInChat = { [weak self] in self?.openInChat() }
+        vc.onDismissComplexityNudge = { [weak self] in
+            self?.nudgeDismissed = true
+        }
+        vc.onContextInspect = { [weak self] in
+            self?.toggleContextInspector()
+        }
+        vc.onCloseOverlay = { [weak self] in
+            self?.dismiss()
+        }
+    }
+
+    private func contextChipPreview() -> String? {
+        let chips = sessionContexts.enumerated().map { idx, ctx in
+            ContextCaptureFormatting.chipLabel(for: ctx, index: idx)
+        }
+        guard !chips.isEmpty else { return nil }
+        let joined = chips.prefix(3).joined(separator: " · ")
+        let overflow = chips.count > 3 ? " · +\(chips.count - 3)" : ""
+        return joined + overflow
+    }
+
+    private func refreshContextChrome() {
+        vc.updateContextPill(
+            snapshotCount: sessionContexts.count,
+            chipPreview: contextChipPreview()
+        )
+        contextInspector.refresh(contexts: sessionContexts)
+    }
+
+    private func toggleContextInspector() {
+        guard !sessionContexts.isEmpty else { return }
+        if contextInspector.isShown {
+            contextInspector.close()
+            return
+        }
+        contextInspector.show(
+            relativeTo: vc.contextPillFrameForPopover(),
+            of: vc.view,
+            contexts: sessionContexts
+        )
+    }
+
+    private func beginSession() {
+        if sessionInteractionId.isEmpty {
+            sessionInteractionId = UUID().uuidString
+        }
+        conversationId = nil
+        hasSubmittedQuery = false
+        nudgeDismissed = false
+        turnCount = 0
+        lastQueryUsedAgentOrSkill = false
+        isHandoffInFlight = false
+        vc.updateHandoffChrome(enabled: false, title: "Open in chat", inFlight: false)
+        vc.showComplexityNudge(false)
+    }
+
+    func openInChat() {
+        guard !sessionInteractionId.isEmpty, let remi = remiClient else { return }
+        if let convoId = conversationId {
+            RemiClient.openChat(conversationId: convoId)
+            return
+        }
+        isHandoffInFlight = true
+        vc.updateHandoffChrome(enabled: false, title: "Opening…", inFlight: true)
+        let transcript = vc.responseTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !transcript.isEmpty {
+            remi.updateContext(
+                interactionId: sessionInteractionId,
+                prompt: nil,
+                responseSoFar: transcript
+            )
+        }
+        remi.handoff(interactionId: sessionInteractionId, responseSoFar: transcript) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isHandoffInFlight = false
+                switch result {
+                case .success(let response):
+                    self.conversationId = response.conversationId
+                    self.vc.updateHandoffChrome(
+                        enabled: true,
+                        title: "Open chat",
+                        inFlight: false
+                    )
+                    RemiClient.openChat(conversationId: response.conversationId)
+                case .failure(let error):
+                    self.vc.updateHandoffChrome(
+                        enabled: self.hasSubmittedQuery,
+                        title: "Open in chat",
+                        inFlight: false
+                    )
+                    self.vc.finishResponse(error: error)
+                }
+            }
+        }
+    }
+
+    private func shouldShowComplexityNudge(query: String, responseLength: Int) -> Bool {
+        guard !nudgeDismissed, conversationId == nil else { return false }
+        var score = 0
+        if screenshotCount >= 3 { score += 1 }
+        if turnCount >= 2 && responseLength > 500 { score += 1 }
+        if responseLength > 1200 { score += 1 }
+        if lastQueryUsedAgentOrSkill && responseLength > 600 { score += 1 }
+        return score >= 2
     }
 
     func loadCatalog(using remi: RemiClient) {
@@ -2191,24 +2813,6 @@ final class OverlayWindowController: NSWindowController, NSWindowDelegate {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    func show(
-        at screenPoint: CGPoint,
-        sessionContexts: [CursorContext],
-        llm: LLM,
-        interactionNumber: Int,
-        requireEscToDismiss: Bool = false
-    ) {
-        guard let screen = NSScreen.main else { return }
-        guard let primary = sessionContexts.last else { return }
-        vc.onHeightChange = { [weak self] height in
-            self?.resizePanel(height: height, width: nil, animated: true)
-        }
-        vc.onWidthChange = { [weak self] width in
-            self?.resizePanel(height: nil, width: width, animated: true)
-        }
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
     func windowDidResize(_ notification: Notification) {
         guard !isProgrammaticResize else { return }
         vc.syncLayoutToWindow(userInitiated: true)
@@ -2232,17 +2836,34 @@ final class OverlayWindowController: NSWindowController, NSWindowDelegate {
         vc.applyLayout(collapsed: vc.isCollapsed)
     }
 
-    func show(at screenPoint: CGPoint, context: CursorContext, llm: LLM, requireEscToDismiss: Bool = false) {
+    func show(
+        at screenPoint: CGPoint,
+        sessionContexts: [CursorContext],
+        llm: LLM,
+        interactionNumber: Int,
+        requireEscToDismiss: Bool = false
+    ) {
         guard let screen = NSScreen.main, let panel = window else { return }
+        guard let primary = sessionContexts.last else { return }
+
+        vc.onHeightChange = { [weak self] height in
+            self?.resizePanel(height: height, width: nil, animated: true)
+        }
+        vc.onWidthChange = { [weak self] width in
+            self?.resizePanel(height: nil, width: width, animated: true)
+        }
+
         let panelH = panel.frame.height > 0 ? panel.frame.height : Config.overlayMinHeight
         let panelW = panel.frame.width > 0 ? panel.frame.width : Config.overlayWidth
         let origin = NSPoint(
             x: screenPoint.x - panelW / 2,
             y: screen.frame.height - screenPoint.y - panelH / 2 - 70
         )
-        window?.setFrameOrigin(origin)
+        panel.setFrameOrigin(origin)
+
         self.sessionContexts = sessionContexts
         self.storedInteractionNumber = interactionNumber
+        beginSession()
         self.showingCaptureStatus = false
         selectedAgentId = nil
         selectedSkillNames = []
@@ -2254,10 +2875,7 @@ final class OverlayWindowController: NSWindowController, NSWindowDelegate {
             mergedTexts: mergedContextText,
             screenshotCount: screenshotCount
         )
-        resetCapturedContext(with: primary)
-        panel.setFrameOrigin(origin)
-        vc.reset(context: context, llm: llm)
-        resetCapturedContext(with: context)
+        updatePersistentCaptureStatusFromSessions()
         NSApp.activate(ignoringOtherApps: true)
         window?.orderFront(nil)
         window?.makeKey()
@@ -2287,8 +2905,13 @@ final class OverlayWindowController: NSWindowController, NSWindowDelegate {
 
         escKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] e in
             guard let self else { return e }
+            let mods = e.modifierFlags.intersection([.command, .shift, .control, .option])
             if e.keyCode == 53 {
                 self.dismiss()
+                return nil
+            }
+            if e.keyCode == 31, mods == [.command, .shift] {
+                self.openInChat()
                 return nil
             }
             return e
@@ -2333,6 +2956,39 @@ final class OverlayWindowController: NSWindowController, NSWindowDelegate {
                 self.vc.updateHoverPreview(preview)
             }
         }
+        installContextPickMonitor()
+    }
+
+    private func installContextPickMonitor() {
+        removeContextPickMonitor()
+        contextPickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            guard let self else { return }
+            guard self.window?.isVisible == true else { return }
+            let mods = event.modifierFlags.intersection([.command, .shift, .control, .option])
+            guard mods == [.option] else { return }
+            let pt = NSEvent.mouseLocation
+            if let w = self.window, w.frame.contains(pt) { return }
+            DispatchQueue.main.async { [weak self] in
+                self?.onOptionClickCapture?(pt)
+            }
+        }
+    }
+
+    private func removeContextPickMonitor() {
+        if let m = contextPickMonitor {
+            NSEvent.removeMonitor(m)
+            contextPickMonitor = nil
+        }
+    }
+
+    func show(at screenPoint: CGPoint, context: CursorContext, llm: LLM, requireEscToDismiss: Bool = false) {
+        show(
+            at: screenPoint,
+            sessionContexts: [context],
+            llm: llm,
+            interactionNumber: storedInteractionNumber > 0 ? storedInteractionNumber : 1,
+            requireEscToDismiss: requireEscToDismiss
+        )
     }
 
     func dismiss() {
@@ -2356,24 +3012,36 @@ final class OverlayWindowController: NSWindowController, NSWindowDelegate {
             NSEvent.removeMonitor(m)
             copyKeyGlobalMonitor = nil
         }
+        removeContextPickMonitor()
         lastClipboardString = nil
-        capturedContextSnippets.removeAll()
         sessionContexts.removeAll()
         mergedContextText = nil
         screenshotCount = 0
         additionalScreenshots = []
+        sessionInteractionId = ""
+        conversationId = nil
+        hasSubmittedQuery = false
+        nudgeDismissed = false
+        turnCount = 0
+        lastQueryUsedAgentOrSkill = false
+        isHandoffInFlight = false
+        lastSubmittedQuery = ""
         showingCaptureStatus = false
         selectedAgentId = nil
         selectedSkillNames = []
         catalog = nil
         remiClient?.cancelActiveStream()
         remiClient = nil
+        contextInspector.close()
+        vc.showComplexityNudge(false)
+        vc.updateHandoffChrome(enabled: false, title: "Open in chat", inFlight: false)
         window?.orderOut(nil)
     }
 
     func appendContext(_ context: CursorContext) {
         sessionContexts.append(context)
         rebuildMergedContext()
+        refreshContextChrome()
         showingCaptureStatus = true
         vc.updateSnapshotHeader(
             interactionNumber: storedInteractionNumber,
@@ -2381,9 +3049,7 @@ final class OverlayWindowController: NSWindowController, NSWindowDelegate {
             mergedTexts: mergedContextText,
             screenshotCount: screenshotCount
         )
-        if let snippet = contextSnippet(from: context) {
-            appendCapturedSnippet(snippet)
-        }
+        updatePersistentCaptureStatusFromSessions()
     }
 
     func finishInitialCapture(_ context: CursorContext) {
@@ -2393,19 +3059,14 @@ final class OverlayWindowController: NSWindowController, NSWindowDelegate {
             sessionContexts.append(context)
         }
         rebuildMergedContext()
+        refreshContextChrome()
         vc.updateSnapshotHeader(
             interactionNumber: storedInteractionNumber,
             context: context,
             mergedTexts: mergedContextText,
             screenshotCount: screenshotCount
         )
-        if let snippet = contextSnippet(from: context) {
-            capturedContextSnippets = [snippet]
-            vc.updatePersistentCaptureStatus(
-                contextCount: max(capturedContextSnippets.count, 1),
-                latest: snippet
-            )
-        }
+        updatePersistentCaptureStatusFromSessions()
     }
 
     private func rebuildMergedContext() {
@@ -2418,34 +3079,14 @@ final class OverlayWindowController: NSWindowController, NSWindowDelegate {
         let extras = Array(sessionContexts.dropLast()).compactMap { $0.screenshotData }
         let maxExtras = max(0, Config.maxScreenshotsPerQuery - 1)
         additionalScreenshots = Array(extras.suffix(maxExtras))
+        refreshContextChrome()
     }
 
-    func addCapturedContext(_ context: CursorContext) {
-        guard let snippet = contextSnippet(from: context) else { return }
-        appendCapturedSnippet(snippet)
-    }
-
-    func queryWithCapturedContext(_ query: String) -> String {
-        guard !capturedContextSnippets.isEmpty else { return query }
-        let list = capturedContextSnippets.enumerated().map { idx, item in
-            "\(idx + 1). \(item)"
-        }.joined(separator: "\n")
-        return """
-        \(query)
-
-        Additional pointer contexts collected across windows:
-        \(list)
-        """
-    }
-
-    private func resetCapturedContext(with context: CursorContext) {
-        capturedContextSnippets.removeAll()
-        if let snippet = contextSnippet(from: context) {
-            capturedContextSnippets = [snippet]
-        }
+    private func updatePersistentCaptureStatusFromSessions() {
+        let snippets = sessionContexts.compactMap { contextSnippet(from: $0) }
         vc.updatePersistentCaptureStatus(
-            contextCount: max(sessionContexts.count, 1),
-            latest: capturedContextSnippets.last
+            contextCount: max(sessionContexts.count, snippets.isEmpty ? 0 : 1),
+            latest: snippets.last
         )
     }
 
@@ -2466,19 +3107,14 @@ final class OverlayWindowController: NSWindowController, NSWindowDelegate {
               !raw.isEmpty else { return }
         guard raw != lastClipboardString else { return }
         lastClipboardString = raw
-        appendCapturedSnippet("Copied: \(String(raw.prefix(220)))")
-    }
-
-    private func appendCapturedSnippet(_ snippet: String) {
-        guard !snippet.isEmpty else { return }
-        if capturedContextSnippets.last != snippet {
-            capturedContextSnippets.append(snippet)
-        }
-        showingCaptureStatus = true
-        vc.updatePersistentCaptureStatus(
-            contextCount: sessionContexts.count,
-            latest: snippet
+        let clipContext = CursorContext(
+            interactionId: UUID().uuidString,
+            source: .cursor(position: NSEvent.mouseLocation),
+            hoveredText: raw,
+            appName: NSWorkspace.shared.frontmostApplication?.localizedName,
+            screenshotData: nil
         )
+        appendContext(clipContext)
     }
 
     func submit(
@@ -2487,32 +3123,62 @@ final class OverlayWindowController: NSWindowController, NSWindowDelegate {
         remi: RemiClient,
         onComplete: ((Error?) -> Void)? = nil
     ) {
-    func submit(query: String, context: CursorContext, remi: RemiClient) {
         remiClient = remi
+        turnCount += 1
+        lastSubmittedQuery = query
+        lastQueryUsedAgentOrSkill = selectedAgentId != nil
+            || !selectedSkillNames.isEmpty
+            || query.contains("@")
+            || query.contains("/")
         vc.showLoading()
+        let sessionId = sessionInteractionId
         remi.send(
             query: query,
             llm: vc.currentLLM,
             context: context,
+            sessionInteractionId: sessionId,
             mergedContextText: mergedContextText,
             screenshotCount: screenshotCount,
             additionalScreenshots: additionalScreenshots,
             agentId: selectedAgentId,
             manualSkills: selectedSkillNames,
-            onToken:    { [weak self] t   in self?.vc.appendToken(t) },
+            onToken: { [weak self] token in
+                guard let self else { return }
+                self.vc.appendToken(token)
+                self.remiClient?.scheduleContextUpdate(
+                    interactionId: sessionId,
+                    prompt: nil,
+                    responseSoFar: self.vc.responseTranscript
+                )
+            },
             onComplete: { [weak self] err in
-                self?.vc.finishResponse(error: err)
-                self?.selectedAgentId = nil
-                self?.selectedSkillNames = []
+                guard let self else { return }
+                self.vc.finishResponse(error: err)
+                self.selectedAgentId = nil
+                self.selectedSkillNames = []
+                if err == nil {
+                    self.hasSubmittedQuery = true
+                    let handoffTitle = self.conversationId != nil ? "Open chat" : "Open in chat"
+                    self.vc.updateHandoffChrome(enabled: true, title: handoffTitle, inFlight: false)
+                    if self.shouldShowComplexityNudge(
+                        query: self.lastSubmittedQuery,
+                        responseLength: self.vc.responseTranscript.count
+                    ) {
+                        self.vc.showComplexityNudge(true)
+                    }
+                }
                 onComplete?(err)
             }
         )
     }
 
-    func indexCapture(_ context: CursorContext, remi: RemiClient) {
+    func indexCapture(_ context: CursorContext, remi: RemiClient, snapshotIndex: Int) {
         guard let snippet = contextSnippet(from: context) else { return }
+        let indexId = sessionInteractionId.isEmpty
+            ? context.interactionId
+            : "\(sessionInteractionId)-\(snapshotIndex)"
         remi.indexContext(
-            interactionId: context.interactionId,
+            interactionId: indexId,
             text: snippet,
             appName: context.appName
         )
@@ -2537,7 +3203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var interactionCount = 0
     private var lastCursorPosition: CGPoint = .zero
     private var lastOpenTime: Date?
-    private var lastOverlayShiftTime = Date.distantPast
+    private var lastContextCaptureTime = Date.distantPast
     private var accumulatedContexts: [CursorContext] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -2615,54 +3281,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func registerHotkey() {
-        let shiftHandler: (NSEvent) -> Void = { [weak self] event in
+        let keyDownHandler: (NSEvent) -> Void = { [weak self] event in
             guard let self else { return }
-            guard event.keyCode == 56 || event.keyCode == 60 else { return }
-            guard event.modifierFlags.contains(.shift) else { return }
-            guard !event.modifierFlags.contains(.command),
-                  !event.modifierFlags.contains(.control),
-                  !event.modifierFlags.contains(.option) else { return }
-            if self.overlay.window?.isVisible == true {
-                self.captureContextInOverlay(at: self.lastCursorPosition)
+            guard !event.isARepeat else { return }
+
+            if event.keyCode == Config.selectModeKeyCode,
+               event.modifierFlags.contains(.option),
+               !event.modifierFlags.contains(.command),
+               !event.modifierFlags.contains(.control),
+               !event.modifierFlags.contains(.shift) {
+                if let last = self.lastOpenTime, Date().timeIntervalSince(last) < 0.35 { return }
+                self.lastOpenTime = Date()
+                self.openOverlay(at: self.lastCursorPosition)
                 return
             }
-            self.captureContextSilently(at: self.lastCursorPosition)
-        }
 
-        NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            guard let self else { return }
-            DispatchQueue.main.async { shiftHandler(event) }
-        }
-        NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
-            DispatchQueue.main.async { shiftHandler(event) }
-            return event
-        }
+            guard event.keyCode == Config.contextCaptureKeyCode else { return }
+            let mods = event.modifierFlags.intersection([.command, .shift, .control, .option])
+            guard mods == Config.contextCaptureModifiers else { return }
 
-        let optionSpaceHandler: (NSEvent) -> Void = { [weak self] event in
-            guard let self else { return }
-            guard event.keyCode == 49 else { return }
-            guard event.modifierFlags.contains(.option),
-                  !event.modifierFlags.contains(.command),
-                  !event.modifierFlags.contains(.control),
-                  !event.modifierFlags.contains(.shift) else { return }
-            if let last = self.lastOpenTime, Date().timeIntervalSince(last) < 0.35 { return }
-            self.lastOpenTime = Date()
-            self.openOverlay(at: self.lastCursorPosition)
+            let now = Date()
+            guard now.timeIntervalSince(self.lastContextCaptureTime) >= 0.35 else { return }
+            self.lastContextCaptureTime = now
+
+            if self.overlay.window?.isVisible == true {
+                self.captureContextInOverlay(at: self.lastCursorPosition)
+            } else {
+                self.captureContextSilently(at: self.lastCursorPosition)
+            }
         }
 
         NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
-            DispatchQueue.main.async { optionSpaceHandler(event) }
+            DispatchQueue.main.async { keyDownHandler(event) }
         }
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            DispatchQueue.main.async { optionSpaceHandler(event) }
+            DispatchQueue.main.async { keyDownHandler(event) }
             return event
         }
     }
 
     private func captureContextInOverlay(at point: CGPoint) {
-        let now = Date()
-        guard now.timeIntervalSince(lastOverlayShiftTime) >= 0.35 else { return }
-        lastOverlayShiftTime = now
         capturer.capture(at: point) { [weak self] ctx in
             guard let self else { return }
             self.lastCtx = ctx
@@ -2731,7 +3389,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func indexContextForRAG(_ context: CursorContext) {
-        overlay.indexCapture(context, remi: remi)
+        let index = max(0, overlay.sessionContextCount - 1)
+        overlay.indexCapture(context, remi: remi, snapshotIndex: index)
     }
 
     private func showContextFlash(at point: CGPoint, count: Int) {
@@ -2777,12 +3436,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 guard !self.selWindow.isVisible else { return }
                 self.openOverlay(at: pt)
-
-                self.capturer.capture(at: pt) { ctx in
-                    guard self.wiggleRequestID == requestID else { return }
-                    self.lastCtx = ctx
-                    self.overlay.show(at: pt, context: ctx, llm: self.activeLLM)
-                }
             }
         }
     }
@@ -2812,9 +3465,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.lastCtx = ctx
                     self.overlay.finishInitialCapture(ctx)
                     self.indexContextForRAG(ctx)
-                self.capturer.capture(region: rect) { ctx in
-                    self.lastCtx = ctx
-                    self.overlay.show(at: anchor, context: ctx, llm: self.activeLLM)
                 }
             }
         }
@@ -2824,12 +3474,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.hoverPreviewProvider = { [weak self] point in
             self?.capturer.previewHover(at: point)
         }
+        overlay.onOptionClickCapture = { [weak self] point in
+            self?.captureContextInOverlay(at: point)
+        }
         overlay.onLLMChange = { [weak self] llm in
             self?.activeLLM = llm
             self?.selWindow.activeLLM = llm
         }
         overlay.vc.onSubmit = { [weak self] query in
-            guard let self, let ctx = self.lastCtx else { return }
+            guard let self else { return }
+            guard let ctx = self.overlay.currentPrimaryContext ?? self.lastCtx else { return }
+            self.lastCtx = ctx
             let snapshots = self.overlay.sessionContextCount
             self.fileLog("submit query=\(query.prefix(60)) snapshots=\(snapshots) llm=\(self.activeLLM.rawValue)")
             self.overlay.submit(query: query, context: ctx, remi: self.remi) { [weak self] err in

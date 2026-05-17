@@ -141,6 +141,36 @@ describe('REMi routes', () => {
       expect(row.responseSoFar).toBe('Hello world');
       expect(row.model).toBe('anthropic/claude-sonnet-4');
     });
+
+    it('persists capture metadata on query upsert', async () => {
+      streamOpenRouterCompletion.mockImplementation(() => mockTokenStream());
+
+      await request(app)
+        .post('/api/remi/query')
+        .set('Authorization', 'Bearer test-token')
+        .send({
+          interactionId: 'query-meta',
+          query: 'Explain',
+          llm: 'claude',
+          captureMode: 'cursor',
+          cursorX: 1,
+          cursorY: 2,
+          hoveredText: 'Button label',
+          appName: 'Safari',
+          mergedContextText: 'Button label\n---\nFooter',
+          screenshotCount: 2,
+          screenshotBase64: `data:image/png;base64,${ONE_BY_ONE_PNG_BASE64}`,
+          additionalScreenshotsBase64: [ONE_BY_ONE_PNG_BASE64],
+        });
+
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      const row = handoffStore.getInteraction('query-meta');
+      expect(row.hoveredText).toBe('Button label');
+      expect(row.appName).toBe('Safari');
+      expect(row.mergedContextText).toContain('Footer');
+      expect(row.screenshotCount).toBe(2);
+    });
   });
 
   describe('POST /context', () => {
@@ -248,6 +278,35 @@ describe('REMi routes', () => {
 
       expect(response.status).toBe(200);
       expect(response.headers['content-type']).toMatch(/image\/png|application\/octet-stream/);
+    });
+
+    it('serves extra screenshots by index', async () => {
+      handoffStore.upsertInteraction({
+        id: 'multi-shot',
+        screenshot: ONE_BY_ONE_PNG_BASE64,
+        additionalScreenshots: [ONE_BY_ONE_PNG_BASE64],
+      });
+
+      const primary = await request(app)
+        .get('/api/remi/interactions/multi-shot/screenshot?index=0')
+        .set('Authorization', 'Bearer test-token');
+      const extra = await request(app)
+        .get('/api/remi/interactions/multi-shot/screenshot?index=1')
+        .set('Authorization', 'Bearer test-token');
+
+      expect(primary.status).toBe(200);
+      expect(extra.status).toBe(200);
+    });
+
+    it('returns 400 for invalid screenshot index', async () => {
+      handoffStore.upsertInteraction({ id: 'bad-index', screenshot: ONE_BY_ONE_PNG_BASE64 });
+
+      const response = await request(app)
+        .get('/api/remi/interactions/bad-index/screenshot?index=9')
+        .set('Authorization', 'Bearer test-token');
+
+      expect(response.status).toBe(400);
+      expect(response.body.error).toContain('Invalid screenshot index');
     });
   });
 

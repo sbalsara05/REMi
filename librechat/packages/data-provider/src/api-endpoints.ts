@@ -147,8 +147,13 @@ export const remiInteractions = (cursor?: string | null, limit?: number) => {
 
 export const remiInteraction = (id: string) => `${remiRoot}/interactions/${id}`;
 
-export const remiInteractionScreenshot = (id: string) =>
-  `${remiRoot}/interactions/${id}/screenshot`;
+export const remiInteractionScreenshot = (id: string, index?: number) => {
+  const base = `${remiRoot}/interactions/${id}/screenshot`;
+  if (index === undefined || index === 0) {
+    return base;
+  }
+  return `${base}?index=${index}`;
+};
 
 export const remiContext = () => `${remiRoot}/context`;
 

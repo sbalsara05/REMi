@@ -98,6 +98,24 @@ function ensureDirs() {
   fs.mkdirSync(getScreenshotsDir(), { recursive: true });
 }
 
+const MIGRATION_COLUMNS = [
+  { name: 'app_name', ddl: 'TEXT' },
+  { name: 'hovered_text', ddl: 'TEXT' },
+  { name: 'merged_context_text', ddl: 'TEXT' },
+  { name: 'screenshot_count', ddl: 'INTEGER' },
+];
+
+function migrateSchema(db) {
+  const existing = new Set(
+    db.prepare(`PRAGMA table_info(interactions)`).all().map((col) => col.name),
+  );
+  for (const { name, ddl } of MIGRATION_COLUMNS) {
+    if (!existing.has(name)) {
+      db.exec(`ALTER TABLE interactions ADD COLUMN ${name} ${ddl}`);
+    }
+  }
+}
+
 function getDb() {
   if (dbInstance) {
     return dbInstance;
@@ -106,6 +124,7 @@ function getDb() {
   dbInstance = new Database(getDbPath());
   dbInstance.pragma('journal_mode = WAL');
   dbInstance.exec(SCHEMA);
+  migrateSchema(dbInstance);
   logger.info(`[remi] Handoff SQLite: ${getDbPath()}`);
   return dbInstance;
 }
@@ -124,12 +143,24 @@ function mapRow(row) {
     cropHash: row.crop_hash,
     syncedToChat: Boolean(row.synced_to_chat),
     conversationId: row.conversation_id,
+    appName: row.app_name ?? null,
+    hoveredText: row.hovered_text ?? null,
+    mergedContextText: row.merged_context_text ?? null,
   };
   const resolvedScreenshotPath = resolveInteractionScreenshotPath(interaction);
+  let screenshotCount = Number(row.screenshot_count);
+  if (!Number.isFinite(screenshotCount) || screenshotCount < 0) {
+    try {
+      screenshotCount = listScreenshotPaths(row.id).length;
+    } catch {
+      screenshotCount = resolvedScreenshotPath ? 1 : 0;
+    }
+  }
   return {
     ...interaction,
     screenshotPath: resolvedScreenshotPath,
     hasScreenshot: Boolean(resolvedScreenshotPath),
+    screenshotCount,
   };
 }
 
@@ -137,7 +168,8 @@ function listInteractions({ cursor, limit = 25 }) {
   const db = getDb();
   const params = [];
   let sql = `SELECT id, created_at, prompt, response_so_far, screenshot_path, model, crop_hash,
-    synced_to_chat, conversation_id FROM interactions`;
+    synced_to_chat, conversation_id, app_name, hovered_text, merged_context_text, screenshot_count
+    FROM interactions`;
   if (cursor) {
     sql += ` WHERE created_at < ?`;
     params.push(Number(cursor));
@@ -183,6 +215,79 @@ function writeScreenshotFromBase64(base64, interactionId) {
   return dest;
 }
 
+function resolveExtraScreenshotPath(interactionId, index) {
+  validateInteractionId(interactionId);
+  if (!Number.isInteger(index) || index < 1 || index > 3) {
+    throw new Error('Invalid extra screenshot index');
+  }
+  const screenshotsDir = path.resolve(getScreenshotsDir());
+  const dest = path.resolve(path.join(screenshotsDir, `${interactionId}-${index}.png`));
+  if (!dest.startsWith(`${screenshotsDir}${path.sep}`)) {
+    throw new Error('Invalid interactionId');
+  }
+  return dest;
+}
+
+function normalizeScreenshotBase64(value) {
+  if (typeof value !== 'string' || !value.length) {
+    return null;
+  }
+  return value.replace(/^data:image\/\w+;base64,/, '');
+}
+
+/** Writes up to 3 extra PNGs as `{interactionId}-1.png`, `{interactionId}-2.png`, … */
+function writeAdditionalScreenshotsFromBase64(interactionId, screenshots) {
+  if (!Array.isArray(screenshots) || screenshots.length === 0) {
+    return;
+  }
+  screenshots.slice(0, 3).forEach((item, idx) => {
+    const raw = normalizeScreenshotBase64(item);
+    if (!raw) {
+      return;
+    }
+    const dest = resolveExtraScreenshotPath(interactionId, idx + 1);
+    fs.writeFileSync(dest, Buffer.from(raw, 'base64'));
+  });
+}
+
+/** index 0 = primary `{id}.png`; 1–3 = `{id}-{index}.png` extras. */
+function resolveScreenshotPathForIndex(interactionId, index) {
+  validateInteractionId(interactionId);
+  const parsed = Number(index);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 3) {
+    throw new Error('Invalid screenshot index');
+  }
+  if (parsed === 0) {
+    return resolveScreenshotPath(interactionId);
+  }
+  return resolveExtraScreenshotPath(interactionId, parsed);
+}
+
+/** Primary `{id}.png` then `{id}-1.png`, `{id}-2.png`, `{id}-3.png` when present. */
+function listScreenshotPaths(interactionId) {
+  validateInteractionId(interactionId);
+  const paths = [];
+  try {
+    const primary = resolveScreenshotPath(interactionId);
+    if (fs.existsSync(primary)) {
+      paths.push(primary);
+    }
+  } catch {
+    // invalid id — skip primary
+  }
+  for (let i = 1; i <= 3; i += 1) {
+    try {
+      const extra = resolveExtraScreenshotPath(interactionId, i);
+      if (fs.existsSync(extra)) {
+        paths.push(extra);
+      }
+    } catch {
+      break;
+    }
+  }
+  return paths;
+}
+
 function patchResponseSoFar(id, responseSoFar) {
   validateInteractionId(id);
   const db = getDb();
@@ -204,19 +309,63 @@ function upsertInteraction(data) {
 
   let screenshotPath = data.screenshot_path ?? null;
   if (data.screenshot && typeof data.screenshot === 'string') {
-    const raw = data.screenshot.replace(/^data:image\/\w+;base64,/, '');
-    screenshotPath = writeScreenshotFromBase64(raw, id);
+    const raw = normalizeScreenshotBase64(data.screenshot);
+    if (raw) {
+      screenshotPath = writeScreenshotFromBase64(raw, id);
+    }
   }
 
+  if (Array.isArray(data.additionalScreenshots) && data.additionalScreenshots.length > 0) {
+    writeAdditionalScreenshotsFromBase64(id, data.additionalScreenshots);
+  }
+
+  let screenshotCount = Number(data.screenshot_count ?? data.screenshotCount);
+  if (!Number.isFinite(screenshotCount) || screenshotCount < 0) {
+    try {
+      screenshotCount = listScreenshotPaths(id).length;
+    } catch {
+      screenshotCount = screenshotPath ? 1 : 0;
+    }
+  }
+
+  const appName =
+    typeof data.app_name === 'string'
+      ? data.app_name
+      : typeof data.appName === 'string'
+        ? data.appName
+        : null;
+  const hoveredText =
+    typeof data.hovered_text === 'string'
+      ? data.hovered_text
+      : typeof data.hoveredText === 'string'
+        ? data.hoveredText
+        : null;
+  const mergedContextText =
+    typeof data.merged_context_text === 'string'
+      ? data.merged_context_text
+      : typeof data.mergedContextText === 'string'
+        ? data.mergedContextText
+        : null;
+
   db.prepare(
-    `INSERT INTO interactions (id, created_at, prompt, response_so_far, screenshot_path, model, crop_hash)
-     VALUES (@id, @created_at, @prompt, @response_so_far, @screenshot_path, @model, @crop_hash)
+    `INSERT INTO interactions (
+       id, created_at, prompt, response_so_far, screenshot_path, model, crop_hash,
+       app_name, hovered_text, merged_context_text, screenshot_count
+     )
+     VALUES (
+       @id, @created_at, @prompt, @response_so_far, @screenshot_path, @model, @crop_hash,
+       @app_name, @hovered_text, @merged_context_text, @screenshot_count
+     )
      ON CONFLICT(id) DO UPDATE SET
        prompt = COALESCE(excluded.prompt, interactions.prompt),
        response_so_far = COALESCE(excluded.response_so_far, interactions.response_so_far),
        screenshot_path = COALESCE(excluded.screenshot_path, interactions.screenshot_path),
        model = COALESCE(excluded.model, interactions.model),
-       crop_hash = COALESCE(excluded.crop_hash, interactions.crop_hash)`,
+       crop_hash = COALESCE(excluded.crop_hash, interactions.crop_hash),
+       app_name = COALESCE(excluded.app_name, interactions.app_name),
+       hovered_text = COALESCE(excluded.hovered_text, interactions.hovered_text),
+       merged_context_text = COALESCE(excluded.merged_context_text, interactions.merged_context_text),
+       screenshot_count = COALESCE(excluded.screenshot_count, interactions.screenshot_count)`,
   ).run({
     id,
     created_at: now,
@@ -225,6 +374,10 @@ function upsertInteraction(data) {
     screenshot_path: screenshotPath,
     model: data.model ?? null,
     crop_hash: data.crop_hash ?? null,
+    app_name: appName,
+    hovered_text: hoveredText,
+    merged_context_text: mergedContextText,
+    screenshot_count: screenshotCount,
   });
 
   return getInteraction(id);
@@ -279,6 +432,10 @@ module.exports = {
   getScreenshotsDir,
   validateInteractionId,
   resolveInteractionScreenshotPath,
+  resolveScreenshotPathForIndex,
+  resolveExtraScreenshotPath,
+  listScreenshotPaths,
+  writeAdditionalScreenshotsFromBase64,
   listInteractions,
   getInteraction,
   upsertInteraction,

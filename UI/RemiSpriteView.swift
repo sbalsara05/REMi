@@ -32,7 +32,8 @@ private enum SpriteSheet {
 
     static func contentsRect(for vp: SpriteViewport, sheetSize: CGSize) -> CGRect {
         let srcX = CGFloat(vp.col) * frameW + vp.ox
-        let srcY = sheetSize.height - CGFloat(vp.row + 1) * frameH + vp.oy
+        // Match web clipBackgroundPosition: top = row*frameH + oy (CALayer origin is bottom-left).
+        let srcY = sheetSize.height - CGFloat(vp.row) * frameH - vp.oy - vp.h
         return CGRect(
             x: srcX / sheetSize.width,
             y: srcY / sheetSize.height,

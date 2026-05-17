@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react';
 import { request } from 'librechat-data-provider';
 
-function remiScreenshotPath(interactionId: string) {
-  return `/api/remi/interactions/${interactionId}/screenshot`;
+function remiScreenshotPath(interactionId: string, index = 0) {
+  const base = `/api/remi/interactions/${interactionId}/screenshot`;
+  if (index <= 0) {
+    return base;
+  }
+  return `${base}?index=${index}`;
 }
 
 type ScreenshotLoadState = 'idle' | 'loading' | 'ready' | 'missing';
 
 /** Loads a REMi capture screenshot with auth headers (img src cannot send Bearer). */
-export function useRemiScreenshotUrl(interactionId: string, enabled: boolean) {
+export function useRemiScreenshotUrl(interactionId: string, enabled: boolean, index = 0) {
   const [url, setUrl] = useState<string | null>(null);
   const [state, setState] = useState<ScreenshotLoadState>('idle');
 
@@ -24,7 +28,7 @@ export function useRemiScreenshotUrl(interactionId: string, enabled: boolean) {
     setUrl(null);
 
     request
-      .getResponse(remiScreenshotPath(interactionId), {
+      .getResponse(remiScreenshotPath(interactionId, index), {
         responseType: 'blob',
         headers: { Accept: 'image/png, image/*' },
       })
@@ -63,7 +67,7 @@ export function useRemiScreenshotUrl(interactionId: string, enabled: boolean) {
         return null;
       });
     };
-  }, [interactionId, enabled]);
+  }, [interactionId, enabled, index]);
 
   return { url, state };
 }

@@ -9,6 +9,22 @@ const { getRemiCatalog, resolveDefaultAgentId } = require('./catalogService');
 const { runAgentQuery } = require('./agentQueryBridge');
 
 const HANDOFF_DEBOUNCE_MS = 400;
+const HANDOFF_PROMPT_MAX_LEN = 8000;
+
+function buildHandoffPrompt(interactionId, newQuery) {
+  const existing = handoffStore.getInteraction(interactionId);
+  if (!existing?.prompt?.trim() || !existing?.responseSoFar?.trim()) {
+    return newQuery;
+  }
+  const transcript = [
+    `User: ${existing.prompt.trim()}`,
+    `Assistant: ${existing.responseSoFar.trim()}`,
+    `User: ${newQuery}`,
+  ].join('\n\n');
+  return transcript.length > HANDOFF_PROMPT_MAX_LEN
+    ? transcript.slice(0, HANDOFF_PROMPT_MAX_LEN)
+    : transcript;
+}
 
 function writeSse(res, data) {
   res.write(`data: ${data}\n\n`);
@@ -139,11 +155,18 @@ async function handleRemiQuery(req, res) {
     manualSkills: directives.manualSkills,
   });
 
+  const handoffPrompt = buildHandoffPrompt(payload.interactionId, queryText);
+
   handoffStore.upsertInteraction({
     id: payload.interactionId,
-    prompt: queryText,
+    prompt: handoffPrompt,
     screenshot: payload.screenshotBase64,
+    additionalScreenshots: payload.additionalScreenshotsBase64,
     model,
+    appName: payload.appName,
+    hoveredText: payload.hoveredText,
+    mergedContextText: payload.mergedContextText,
+    screenshotCount: payload.screenshotCount,
   });
 
   res.setHeader('Content-Type', 'text/event-stream');

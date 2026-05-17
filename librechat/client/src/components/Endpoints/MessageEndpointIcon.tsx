@@ -159,7 +159,7 @@ const MessageEndpointIcon: React.FC<IconProps> = (props) => {
             <UnknownIcon
               iconURL={iconURL}
               endpoint={endpoint ?? ''}
-              className="h-full w-full object-contain"
+              className="h-full w-full object-cover"
               context="message"
             />
           </div>

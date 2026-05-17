@@ -1,10 +1,15 @@
 # REMi handoff contract (mouse layer ↔ LibreChat)
 
+**Contract version:** v1.1 (multi-screenshot files + overlay handoff; SQLite columns unchanged)
+
 ## SQLite
 
 **Default path (macOS):** `~/Library/Application Support/REMi/interactions.sqlite`
 
-**Screenshots:** `~/Library/Application Support/REMi/screenshots/{interactionId}.png`
+**Screenshots:**
+
+- Primary: `~/Library/Application Support/REMi/screenshots/{interactionId}.png`
+- Extras (from `additionalScreenshotsBase64` on `/query`): `{interactionId}-1.png`, `{interactionId}-2.png`, `{interactionId}-3.png`
 
 **Override:** `REMI_HANDOFF_DB_PATH` (LibreChat API and mouse app must match).
 
@@ -48,7 +53,7 @@ MagicPointer stores `token` / `refreshToken` in Keychain. Accounts with 2FA enab
 | `GET` | `/interactions?cursor=&limit=` | — | `{ interactions, nextCursor }` |
 | `GET` | `/interactions/:id` | — | Interaction object |
 | `GET` | `/interactions/:id/screenshot` | — | PNG bytes |
-| `POST` | `/handoff` | `{ interactionId }` | `{ conversationId, alreadySynced? }` |
+| `POST` | `/handoff` | `{ interactionId, response_so_far? }` | `{ conversationId, alreadySynced? }` |
 | `GET` | `/catalog` | — | `{ agents: [{ id, name, description? }], skills: [{ name, displayName?, description? }] }` |
 | `POST` | `/index` | `{ interactionId, text, appName? }` | `{ fileId, indexed, reason? }` |
 
@@ -101,7 +106,16 @@ Server also accepts explicit `agentId` and `manualSkills[]` on `POST /query`.
 - Done: `data: [DONE]\n\n`
 - Error (after stream started): `data: [ERROR] <message>\n\n`
 
-Server upserts SQLite: `prompt`, `screenshot`, `model` at start; debounced `response_so_far` during stream.
+Server upserts SQLite: `prompt`, primary `screenshot`, extra PNG files, `model` at start; debounced `response_so_far` during stream. Follow-up queries in the same overlay session reuse one `interactionId` and append prior Q/A into `prompt` (capped at 8k chars) before handoff.
+
+### Overlay → chat handoff (MagicPointer)
+
+1. Overlay opens with a stable `sessionInteractionId` (UUID for the panel lifetime).
+2. `POST /query` streams the answer; optional `POST /context` patches `response_so_far` for Mouse History.
+3. User clicks **Open in chat** (or ⌘⇧O) → `POST /handoff` → browser opens `{REMI_LIBRECHAT_WEB_URL or http://localhost:3090}/c/{conversationId}` (Vite dev UI; set `REMI_LIBRECHAT_WEB_URL=http://localhost:3080` when using Docker-only).
+4. Chat user message includes text + all stored screenshots (`message.files` for inline display + `content` image parts).
+5. Assistant message is pre-filled from `response_so_far` (overlay passes latest transcript on handoff).
+6. Second open uses `alreadySynced` + stored `conversation_id` (no duplicate Mongo thread).
 
 **Model map:**
 

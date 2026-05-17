@@ -3164,7 +3164,6 @@ html {
 
   .mouse-stripe-divider {
     height: 4px;
-    width: 100%;
     border: none;
     border-radius: 0;
     background: linear-gradient(

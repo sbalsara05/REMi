@@ -47,6 +47,25 @@ describe('handoffStore', () => {
     expect(fetched).toEqual(created);
   });
 
+  it('stores capture metadata columns', () => {
+    const created = handoffStore.upsertInteraction({
+      id: 'meta-1',
+      hoveredText: 'Label on screen',
+      mergedContextText: 'Label on screen\n---\nFooter',
+      appName: 'Safari',
+      screenshotCount: 2,
+      screenshot: ONE_BY_ONE_PNG_BASE64,
+      additionalScreenshots: [ONE_BY_ONE_PNG_BASE64],
+    });
+
+    expect(created).toMatchObject({
+      hoveredText: 'Label on screen',
+      mergedContextText: expect.stringContaining('Footer'),
+      appName: 'Safari',
+      screenshotCount: 2,
+    });
+  });
+
   it('merges fields on conflict without wiping existing values', () => {
     handoffStore.upsertInteraction({
       id: 'interaction-merge',
@@ -141,6 +160,29 @@ describe('handoffStore', () => {
       syncedToChat: true,
       conversationId: 'convo-abc',
     });
+  });
+
+  it('writes additional screenshots as {id}-N.png and lists them in order', () => {
+    handoffStore.upsertInteraction({
+      id: 'multi-shot',
+      screenshot: ONE_BY_ONE_PNG_BASE64,
+      additionalScreenshots: [ONE_BY_ONE_PNG_BASE64, ONE_BY_ONE_PNG_BASE64],
+    });
+
+    const paths = handoffStore.listScreenshotPaths('multi-shot');
+    expect(paths).toHaveLength(3);
+    expect(paths[0]).toMatch(/multi-shot\.png$/);
+    expect(paths[1]).toMatch(/multi-shot-1\.png$/);
+    expect(paths[2]).toMatch(/multi-shot-2\.png$/);
+    for (const filePath of paths) {
+      expect(fs.existsSync(filePath)).toBe(true);
+    }
+  });
+
+  it('rejects path traversal for extra screenshot indices', () => {
+    expect(() => handoffStore.resolveExtraScreenshotPath('valid-id', 99)).toThrow(
+      'Invalid extra screenshot index',
+    );
   });
 
   it('resolves Docker volume screenshot paths to the host Application Support dir', () => {

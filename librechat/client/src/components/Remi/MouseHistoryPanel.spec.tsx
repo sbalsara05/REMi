@@ -158,6 +158,48 @@ describe('MouseHistoryPanel', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/c/convo-existing');
   });
 
+  it('opens the context inspector without handing off', async () => {
+    useRemiInteractionsInfiniteQuery.mockReturnValue({
+      data: {
+        pages: [
+          {
+            interactions: [
+              {
+                id: 'ctx-view-1',
+                createdAt: Date.now(),
+                prompt: 'Captured prompt',
+                responseSoFar: null,
+                screenshotPath: '/tmp/shot.png',
+                hasScreenshot: true,
+                screenshotCount: 1,
+                hoveredText: 'Visible label',
+                model: null,
+                cropHash: null,
+                syncedToChat: false,
+                conversationId: null,
+              },
+            ],
+            nextCursor: null,
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      fetchNextPage: mockFetchNextPage,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+    });
+
+    renderPanel();
+    await userEvent.click(screen.getByRole('button', { name: /View context/i }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByText('Visible label')).toBeInTheDocument();
+    expect(mockMutateAsync).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
   it('hands off then navigates for unsynced interactions', async () => {
     useRemiInteractionsInfiniteQuery.mockReturnValue({
       data: {

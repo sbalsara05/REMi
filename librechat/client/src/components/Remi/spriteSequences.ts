@@ -62,7 +62,7 @@ export const SPLASH_BOOT_SEQUENCE: SequenceStep[] = [
   { clip: 'idle', loop: true },
 ];
 
-export const HERO_MOUNT: SequenceStep[] = [{ clip: 'slide' }, { clip: 'idle', loop: true }];
+export const HERO_MOUNT: SequenceStep[] = [{ clip: 'idle', loop: true }];
 
 export const DOUBLE_CLICK_CHAIN: SequenceStep[] = [
   { clip: 'slash' },

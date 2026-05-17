@@ -10,9 +10,9 @@ const handoffStore = require('./handoffStore');
 const DEFAULT_ENDPOINT = 'OpenRouter';
 const DEFAULT_MODEL = 'openai/gpt-4o-mini';
 
-async function attachScreenshotToContent({ req, screenshotPath, content }) {
+async function attachScreenshotAsFile({ req, screenshotPath }) {
   if (!screenshotPath || !fs.existsSync(screenshotPath)) {
-    return content;
+    return null;
   }
 
   try {
@@ -26,23 +26,45 @@ async function attachScreenshotToContent({ req, screenshotPath, content }) {
     });
     req.file = prevFile;
 
-    if (file?.filepath && file?.file_id) {
-      content.push({
-        type: ContentTypes.IMAGE_FILE,
-        [ContentTypes.IMAGE_FILE]: {
-          file_id: file.file_id,
-          filename: file.filename,
-          filepath: file.filepath,
-          width: file.width,
-          height: file.height,
-        },
-      });
+    if (!file?.filepath || !file?.file_id) {
+      return null;
     }
+
+    return {
+      file_id: file.file_id,
+      filepath: file.filepath,
+      filename: file.filename,
+      type: file.type ?? 'image/png',
+      width: file.width,
+      height: file.height,
+    };
   } catch (error) {
     logger.warn('[remi] Screenshot attach failed, continuing with text only:', error);
+    return null;
   }
+}
 
-  return content;
+async function attachScreenshotsToMessage({ req, interactionId, content }) {
+  const paths = handoffStore.listScreenshotPaths(interactionId);
+  const files = [];
+  for (const screenshotPath of paths) {
+    const file = await attachScreenshotAsFile({ req, screenshotPath });
+    if (!file) {
+      continue;
+    }
+    files.push(file);
+    content.push({
+      type: ContentTypes.IMAGE_FILE,
+      [ContentTypes.IMAGE_FILE]: {
+        file_id: file.file_id,
+        filename: file.filename,
+        filepath: file.filepath,
+        width: file.width,
+        height: file.height,
+      },
+    });
+  }
+  return files;
 }
 
 async function createHandoffConversation(req, interaction) {
@@ -59,10 +81,14 @@ async function createHandoffConversation(req, interaction) {
   const title = titleSource.length > 80 ? `${titleSource.slice(0, 77)}...` : titleSource;
 
   const content = [];
+  const attachedFiles = await attachScreenshotsToMessage({
+    req,
+    interactionId: interaction.id,
+    content,
+  });
   if (interaction.prompt) {
-    content.push({ type: ContentTypes.TEXT, text: interaction.prompt });
+    content.unshift({ type: ContentTypes.TEXT, text: interaction.prompt });
   }
-  await attachScreenshotToContent({ req, screenshotPath: interaction.screenshotPath, content });
 
   const userPayload = {
     messageId: userMessageId,
@@ -76,6 +102,9 @@ async function createHandoffConversation(req, interaction) {
   };
   if (content.length > 0) {
     userPayload.content = content;
+  }
+  if (attachedFiles.length > 0) {
+    userPayload.files = attachedFiles;
   }
 
   const userMsg = await db.saveMessage(reqCtx, userPayload, { context: 'POST /api/remi/handoff' });
@@ -107,7 +136,12 @@ async function createHandoffConversation(req, interaction) {
   return conversationId;
 }
 
-async function handoffInteraction(req, interactionId) {
+async function handoffInteraction(req, interactionId, options = {}) {
+  const { response_so_far: responseSoFar } = options;
+  if (responseSoFar && typeof responseSoFar === 'string' && responseSoFar.trim()) {
+    handoffStore.patchResponseSoFar(interactionId, responseSoFar.trim());
+  }
+
   const interaction = handoffStore.getInteraction(interactionId);
   if (!interaction) {
     const error = new Error('Interaction not found');

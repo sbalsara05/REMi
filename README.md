@@ -9,14 +9,21 @@ OpenRouter-powered chat on your Mac, built on [LibreChat](https://github.com/dan
 
 ## Quick start
 
-1. **Create local env at the repo root**
+1. **Create local env at the repo root** (or let `start-mac.sh` copy `env.local.example` on first run)
 
 ```bash
 cp env.local.example env.local
 # Edit env.local and set OPENROUTER_KEY=sk-or-v1-...
 ```
 
-2. **Build API image once** (includes REMi handoff / SQLite support)
+2. **Start REMi** (syncs config, links `librechat/.env`, starts MongoDB, Meilisearch, and the API container)
+
+```bash
+chmod +x scripts/start-mac.sh
+./scripts/start-mac.sh
+```
+
+First run builds the local API image (`remi-librechat-api:local`, includes REMi handoff / SQLite). Rebuild after API changes:
 
 ```bash
 cd librechat
@@ -24,14 +31,7 @@ docker compose -f docker-compose.yml -f ../config/docker-compose.remi.yaml --env
 cd ..
 ```
 
-3. **Start REMi**
-
-```bash
-chmod +x scripts/start-mac.sh
-./scripts/start-mac.sh
-```
-
-4. Open **http://localhost:3080**, register a local account, and select **OpenRouter** models.
+3. Open **http://localhost:3080**, register a local account, and select **OpenRouter** models.
 
 ## Environment layout
 
@@ -68,17 +68,17 @@ cd librechat && docker compose -f docker-compose.yml -f ../config/docker-compose
 
 ## Development mode (optional)
 
-Docker for databases, native Node for hot reload (REMi routes work without image rebuild):
+Docker for data services, native Node for hot reload (REMi routes work without rebuilding the API image):
 
 ```bash
-./scripts/dev-mac.sh
+./scripts/dev-mac.sh        # MongoDB, Meilisearch, vectordb, rag_api (Docker)
 cd librechat
-npm run smart-reinstall   # first time only
-npm run backend:dev       # terminal 1
-npm run frontend:dev      # terminal 2 → http://localhost:3090
+npm run build:client        # first time only — creates client/dist
+npm run backend:dev         # terminal 1 — or from repo root: ./scripts/backend-dev.sh
+npm run frontend:dev        # terminal 2 → http://localhost:3090
 ```
 
-`dev-mac.sh` links `librechat/.env` → `../env.local` so LibreChat’s dotenv loader picks up the root file.
+Scripts link `librechat/.env` → `../env.local` and copy `config/librechat.yaml` into `librechat/`. Set `RAG_OPENAI_API_KEY` in `env.local` (same OpenRouter key) if you use file uploads in dev.
 
 ## Tests
 
@@ -107,7 +107,7 @@ Coverage map (see [docs/remi-handoff-test-prd.md](docs/remi-handoff-test-prd.md)
 | Mouse History UI | `client/src/components/Remi/MouseHistoryPanel.spec.tsx` |
 | API URL builders | `packages/data-provider/specs/remi-endpoints.spec.ts` |
 
-First-time setup: run `npm run smart-reinstall` inside `librechat/` so workspace dependencies (including `better-sqlite3`) are installed.
+First-time setup: from `librechat/`, run `npm run smart-reinstall` (workspace deps, including `better-sqlite3`) before `npm run backend:dev` or tests.
 
 ## Mouse layer
 

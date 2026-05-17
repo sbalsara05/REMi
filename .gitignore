@@ -8,3 +8,8 @@ librechat/uploads/
 librechat/logs/
 librechat/log/
 .env.local
+
+# Source art archives and local planning artifacts
+*.zip
+Foozle_*.zip
+.cursor/plans/

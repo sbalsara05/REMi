@@ -49,8 +49,27 @@ MagicPointer stores `token` / `refreshToken` in Keychain. Accounts with 2FA enab
 | `GET` | `/interactions/:id` | — | Interaction object |
 | `GET` | `/interactions/:id/screenshot` | — | PNG bytes |
 | `POST` | `/handoff` | `{ interactionId }` | `{ conversationId, alreadySynced? }` |
+| `GET` | `/catalog` | — | `{ agents: [{ id, name, description? }], skills: [{ name, displayName?, description? }] }` |
+| `POST` | `/index` | `{ interactionId, text, appName? }` | `{ fileId, indexed, reason? }` |
 
 Auth: `Authorization: Bearer <jwt>` from LibreChat login or device login.
+
+### RAG persistent context
+
+Requires `RAG_API_URL` (and `rag_api` + `vectordb` from `./scripts/dev-mac.sh`). Set `RAG_OPENAI_API_KEY` to your OpenRouter key for embeddings.
+
+- Captures and completed Q&A turns are embedded under `entity_id = remi-user:{userId}`.
+- `POST /index` or `POST /context` (with `hoveredText`) indexes text; `POST /query` retrieves relevant chunks into the system prompt.
+- Chunk metadata is tracked in SQLite table `remi_rag_chunks` (same DB file as interactions).
+
+### MagicPointer commands
+
+In the overlay text field:
+
+- `@AgentName` — run via LibreChat agents runtime (`agentId` in body)
+- `/skill-name` — invoke skill(s); requires `@agent` or `REMI_DEFAULT_AGENT_ID`
+
+Server also accepts explicit `agentId` and `manualSkills[]` on `POST /query`.
 
 ### `POST /query` (MagicPointer inference)
 
@@ -67,7 +86,12 @@ Auth: `Authorization: Bearer <jwt>` from LibreChat login or device login.
   "selectionRect": { "x", "y", "width", "height" },
   "hoveredText": "optional",
   "appName": "optional",
-  "screenshotBase64": "optional"
+  "screenshotBase64": "optional",
+  "mergedContextText": "optional",
+  "screenshotCount": 0,
+  "additionalScreenshotsBase64": ["optional"],
+  "agentId": "optional",
+  "manualSkills": ["optional"]
 }
 ```
 
@@ -104,11 +128,30 @@ docker compose -f docker-compose.yml -f ../config/docker-compose.remi.yaml build
 ## Manual test (no Swift)
 
 ```bash
-# After login, set TOKEN and seed via API:
-curl -s -X POST http://localhost:3080/api/remi/context \
+# After login, set TOKEN
+
+# Catalog (agents + skills for overlay)
+curl -s http://localhost:3080/api/remi/catalog -H "Authorization: Bearer $TOKEN"
+
+# Index a capture chunk
+curl -s -X POST http://localhost:3080/api/remi/index \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"prompt":"What is on screen?","response_so_far":"A sample response."}'
+  -d '{"interactionId":"test-capture-1","text":"User was reading about vector databases.","appName":"Safari"}'
+
+# Query (SSE) — should include RAG context from prior index
+curl -N -X POST http://localhost:3080/api/remi/query \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{"interactionId":"test-capture-1","query":"What was I reading about?","llm":"claude","captureMode":"cursor","cursorX":0,"cursorY":0}'
+
+# Agent + skill (replace AGENT_ID)
+curl -N -X POST http://localhost:3080/api/remi/query \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{"interactionId":"test-agent-1","query":"@MyAgent /my-skill hello","llm":"claude","captureMode":"cursor","cursorX":0,"cursorY":0,"agentId":"AGENT_ID","manualSkills":["my-skill"]}'
 
 curl -s -X POST http://localhost:3080/api/remi/handoff \
   -H "Authorization: Bearer $TOKEN" \

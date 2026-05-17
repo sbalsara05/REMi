@@ -2,6 +2,11 @@ const { logger } = require('@librechat/data-schemas');
 const handoffStore = require('./handoffStore');
 const { resolveOpenRouterModel } = require('./modelMap');
 const { streamOpenRouterCompletion } = require('./inferenceService');
+const { buildSystemPrompt } = require('./promptBuilder');
+const ragContextService = require('./ragContextService');
+const { parseQueryDirectives } = require('./queryDirectives');
+const { getRemiCatalog, resolveDefaultAgentId } = require('./catalogService');
+const { runAgentQuery } = require('./agentQueryBridge');
 
 const HANDOFF_DEBOUNCE_MS = 400;
 
@@ -21,6 +26,11 @@ function validateQueryBody(body) {
     hoveredText,
     appName,
     screenshotBase64,
+    additionalScreenshotsBase64,
+    mergedContextText,
+    screenshotCount,
+    agentId,
+    manualSkills,
   } = body ?? {};
 
   if (!interactionId || typeof interactionId !== 'string') {
@@ -42,6 +52,10 @@ function validateQueryBody(body) {
     throw error;
   }
 
+  const bodyManualSkills = Array.isArray(manualSkills)
+    ? manualSkills.filter((s) => typeof s === 'string' && s.trim())
+    : [];
+
   return {
     interactionId,
     query: query.trim(),
@@ -53,6 +67,38 @@ function validateQueryBody(body) {
     hoveredText: hoveredText ?? null,
     appName: appName ?? null,
     screenshotBase64: screenshotBase64 ?? null,
+    additionalScreenshotsBase64: Array.isArray(additionalScreenshotsBase64)
+      ? additionalScreenshotsBase64.filter((item) => typeof item === 'string' && item.length > 0)
+      : [],
+    mergedContextText: typeof mergedContextText === 'string' ? mergedContextText : null,
+    screenshotCount: Number.isFinite(Number(screenshotCount)) ? Number(screenshotCount) : 0,
+    agentId: typeof agentId === 'string' && agentId.trim() ? agentId.trim() : null,
+    manualSkills: bodyManualSkills,
+  };
+}
+
+async function resolveDirectives(req, payload) {
+  const catalog = await getRemiCatalog(req);
+  const parsed = parseQueryDirectives(payload.query, catalog);
+
+  let agentId = payload.agentId || parsed.agentId;
+  const manualSkills = [
+    ...new Set([...(payload.manualSkills ?? []), ...(parsed.manualSkills ?? [])]),
+  ];
+
+  if (!agentId && manualSkills.length > 0) {
+    agentId = await resolveDefaultAgentId(req);
+    if (!agentId) {
+      const error = new Error('Pick an agent with @name to use /skills, or set REMI_DEFAULT_AGENT_ID');
+      error.status = 400;
+      throw error;
+    }
+  }
+
+  return {
+    cleanQuery: parsed.cleanQuery,
+    agentId,
+    manualSkills,
   };
 }
 
@@ -64,11 +110,38 @@ async function handleRemiQuery(req, res) {
     return res.status(error.status || 400).json({ error: error.message });
   }
 
+  let directives;
+  try {
+    directives = await resolveDirectives(req, payload);
+  } catch (error) {
+    return res.status(error.status || 400).json({ error: error.message });
+  }
+
+  const queryText = directives.cleanQuery;
+  let ragContext = '';
+  try {
+    ragContext = await ragContextService.retrieveForQuery({ req, query: queryText });
+  } catch (error) {
+    logger.warn('[remi] RAG retrieve failed', error);
+  }
+
   const model = resolveOpenRouterModel(payload.llm);
+  const systemPrompt = buildSystemPrompt({
+    captureMode: payload.captureMode,
+    appName: payload.appName,
+    hoveredText: payload.hoveredText,
+    cursorX: payload.cursorX,
+    cursorY: payload.cursorY,
+    selectionRect: payload.selectionRect,
+    mergedContextText: payload.mergedContextText,
+    screenshotCount: payload.screenshotCount,
+    ragContext,
+    manualSkills: directives.manualSkills,
+  });
 
   handoffStore.upsertInteraction({
     id: payload.interactionId,
-    prompt: payload.query,
+    prompt: queryText,
     screenshot: payload.screenshotBase64,
     model,
   });
@@ -82,7 +155,6 @@ async function handleRemiQuery(req, res) {
   let accumulated = '';
   let debounceTimer = null;
   let ended = false;
-  let clientDisconnected = false;
 
   const flushHandoff = () => {
     if (!accumulated) {
@@ -105,7 +177,7 @@ async function handleRemiQuery(req, res) {
     }, HANDOFF_DEBOUNCE_MS);
   };
 
-  const endStream = (errorMessage) => {
+  const endStream = async (errorMessage) => {
     if (ended) {
       return;
     }
@@ -115,6 +187,16 @@ async function handleRemiQuery(req, res) {
       debounceTimer = null;
     }
     flushHandoff();
+    if (!errorMessage && accumulated) {
+      ragContextService
+        .indexTurn({
+          req,
+          interactionId: payload.interactionId,
+          query: queryText,
+          response: accumulated,
+        })
+        .catch((err) => logger.warn('[remi] RAG index turn failed', err));
+    }
     if (errorMessage) {
       writeSse(res, `[ERROR] ${errorMessage}`);
     } else {
@@ -124,7 +206,6 @@ async function handleRemiQuery(req, res) {
   };
 
   req.on('close', () => {
-    clientDisconnected = true;
     if (debounceTimer) {
       clearTimeout(debounceTimer);
       debounceTimer = null;
@@ -132,19 +213,60 @@ async function handleRemiQuery(req, res) {
     flushHandoff();
   });
 
+  if (directives.agentId) {
+    try {
+      const finalText = await runAgentQuery({
+        req,
+        res,
+        agentId: directives.agentId,
+        query: queryText,
+        interactionId: payload.interactionId,
+        manualSkills: directives.manualSkills,
+        ragContext,
+      });
+      accumulated = finalText || accumulated;
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+      flushHandoff();
+      ragContextService
+        .indexTurn({
+          req,
+          interactionId: payload.interactionId,
+          query: queryText,
+          response: accumulated,
+        })
+        .catch((err) => logger.warn('[remi] RAG index turn failed', err));
+      return;
+    } catch (error) {
+      logger.error('[remi] agent query stream failed', error);
+      if (!res.headersSent) {
+        return res.status(error.status || 502).json({ error: error.message || 'Agent failed' });
+      }
+      return endStream(error.message || 'Agent failed');
+    }
+  }
+
+  const inferencePayload = {
+    ...payload,
+    query: queryText,
+    systemPrompt,
+  };
+
   try {
-    for await (const token of streamOpenRouterCompletion(payload)) {
+    for await (const token of streamOpenRouterCompletion(inferencePayload)) {
       accumulated += token;
       writeSse(res, token);
       scheduleHandoffFlush();
     }
-    endStream();
+    await endStream();
   } catch (error) {
     logger.error('[remi] query stream failed', error);
     if (!res.headersSent) {
       return res.status(error.status || 502).json({ error: error.message || 'Inference failed' });
     }
-    endStream(error.message || 'Inference failed');
+    await endStream(error.message || 'Inference failed');
   }
 }
 

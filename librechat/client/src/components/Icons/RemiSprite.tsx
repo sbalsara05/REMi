@@ -5,11 +5,14 @@ import {
   SPRITE,
   clipAllowsBleed,
   clipAnimationDuration,
-  clipAnimationPositions,
   clipBackgroundPosition,
   clipBackgroundSize,
   clipFrameSize,
+  clipKeyframeCss,
   getClipDef,
+  getClipFrameRange,
+  getClipFrames,
+  isIdleLikeClip,
   type MouseSpriteClip,
 } from './mouseSpriteCatalog';
 
@@ -18,6 +21,8 @@ export type RemiSpriteProps = {
   scale?: number;
   playing?: boolean;
   loop?: boolean;
+  /** Stagger sprite cycles (e.g. history cards). */
+  animationDelayMs?: number;
   className?: string;
   title?: string;
   'aria-label'?: string;
@@ -26,10 +31,11 @@ export type RemiSpriteProps = {
 };
 
 export default function RemiSprite({
-  clip = 'idleFront',
+  clip = 'idle',
   scale = 1,
   playing = true,
   loop: loopProp,
+  animationDelayMs = 0,
   className,
   title,
   'aria-label': ariaLabel,
@@ -39,32 +45,36 @@ export default function RemiSprite({
   const reactId = useId();
   const animName = `remi-sprite-${reactId.replace(/:/g, '')}`;
   const clipDef = getClipDef(clip);
-  const { frames } = clipDef;
+  const frameCells = getClipFrames(clip);
+  const { count } = getClipFrameRange(clip);
   const loop = loopProp ?? clipDef.loop ?? true;
   const bgSize = clipBackgroundSize(scale);
   const frameSize = clipFrameSize(clip, scale);
-  const { from, to } = clipAnimationPositions(clip, scale);
   const duration = clipAnimationDuration(clip);
+  const idleBob = isIdleLikeClip(clip);
+  const animateFrames = playing && count > 1;
+  const staticPosition = clipBackgroundPosition(clip, 0, scale);
 
   const keyframeCss = useMemo(
-    () =>
-      `@keyframes ${animName}{from{background-position:${from}}to{background-position:${to}}}`,
-    [animName, from, to],
+    () => (playing ? clipKeyframeCss(animName, clip, scale) : ''),
+    [playing, animName, clip, scale],
   );
 
   const label = ariaLabel ?? title;
 
   return (
     <>
-      {playing ? <style>{keyframeCss}</style> : null}
+      {keyframeCss ? <style>{keyframeCss}</style> : null}
       <span
         role="img"
         aria-label={label}
         title={title}
         data-testid={dataTestId}
         data-clip={clip}
+        data-frame-label={frameCells[0]?.label}
         className={cn(
           'remi-sprite',
+          idleBob && playing && 'remi-sprite--idle',
           clipAllowsBleed(clip) && 'remi-sprite--bleed',
           !playing && 'remi-sprite--paused',
           className,
@@ -75,14 +85,25 @@ export default function RemiSprite({
           height: frameSize.h,
           backgroundImage: `url(${SPRITE.url})`,
           backgroundSize: `${bgSize.w}px ${bgSize.h}px`,
-          backgroundPosition: playing ? from : clipBackgroundPosition(clip, 0, scale),
+          backgroundPosition: staticPosition,
           ...(playing
-            ? {
-                animationName: animName,
-                animationDuration: duration,
-                animationTimingFunction: `steps(${frames})`,
-                animationIterationCount: loop ? 'infinite' : '1',
-              }
+            ? animateFrames
+              ? {
+                  animationName: animName,
+                  animationDuration: duration,
+                  animationTimingFunction: 'linear',
+                  animationIterationCount: loop ? 'infinite' : '1',
+                  animationDelay: animationDelayMs > 0 ? `${animationDelayMs}ms` : undefined,
+                }
+              : idleBob
+                ? {
+                    animationName: 'remi-sprite-idle-bob',
+                    animationDuration: '2.8s',
+                    animationTimingFunction: 'ease-in-out',
+                    animationIterationCount: 'infinite',
+                    animationDelay: animationDelayMs > 0 ? `${animationDelayMs}ms` : undefined,
+                  }
+                : {}
             : {}),
         }}
       />

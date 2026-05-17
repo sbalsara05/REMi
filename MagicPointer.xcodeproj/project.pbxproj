@@ -9,6 +9,11 @@
 /* Begin PBXBuildFile section */
 		AA000000000000000000000B /* MagicPointer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000007 /* MagicPointer.swift */; };
 		AA000000000000000000000C /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000008 /* main.swift */; };
+		AA0000000000000000000022 /* RemiSpriteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000021 /* RemiSpriteView.swift */; };
+		AA0000000000000000000024 /* mouse-spritesheet.png in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000023 /* mouse-spritesheet.png */; };
+		AA0000000000000000000026 /* llm-claude.png in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000025 /* llm-claude.png */; };
+		AA0000000000000000000028 /* llm-chatgpt.png in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000027 /* llm-chatgpt.png */; };
+		AA000000000000000000002A /* llm-gemini.png in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000029 /* llm-gemini.png */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -17,6 +22,11 @@
 		AA0000000000000000000008 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		AA0000000000000000000009 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA000000000000000000000A /* MagicPointer.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MagicPointer.entitlements; sourceTree = "<group>"; };
+		AA0000000000000000000021 /* RemiSpriteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemiSpriteView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000023 /* mouse-spritesheet.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "mouse-spritesheet.png"; sourceTree = "<group>"; };
+		AA0000000000000000000025 /* llm-claude.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "llm-claude.png"; sourceTree = "<group>"; };
+		AA0000000000000000000027 /* llm-chatgpt.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "llm-chatgpt.png"; sourceTree = "<group>"; };
+		AA0000000000000000000029 /* llm-gemini.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "llm-gemini.png"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -50,11 +60,24 @@
 			isa = PBXGroup;
 			children = (
 				AA0000000000000000000007 /* MagicPointer.swift */,
+				AA0000000000000000000021 /* RemiSpriteView.swift */,
 				AA0000000000000000000008 /* main.swift */,
+				AA0000000000000000000020 /* Resources */,
 				AA0000000000000000000009 /* Info.plist */,
 				AA000000000000000000000A /* MagicPointer.entitlements */,
 			);
 			path = UI;
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000020 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000023 /* mouse-spritesheet.png */,
+				AA0000000000000000000025 /* llm-claude.png */,
+				AA0000000000000000000027 /* llm-chatgpt.png */,
+				AA0000000000000000000029 /* llm-gemini.png */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -115,6 +138,10 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA0000000000000000000024 /* mouse-spritesheet.png in Resources */,
+				AA0000000000000000000026 /* llm-claude.png in Resources */,
+				AA0000000000000000000028 /* llm-chatgpt.png in Resources */,
+				AA000000000000000000002A /* llm-gemini.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -126,6 +153,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				AA000000000000000000000B /* MagicPointer.swift in Sources */,
+				AA0000000000000000000022 /* RemiSpriteView.swift in Sources */,
 				AA000000000000000000000C /* main.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

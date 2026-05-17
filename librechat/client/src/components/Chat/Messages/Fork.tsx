@@ -8,6 +8,7 @@ import { ForkOptions } from 'librechat-data-provider';
 import { GitCommit, GitBranchPlus, ListTree } from 'lucide-react';
 import { TranslationKeys, useLocalize, useNavigateToConvo } from '~/hooks';
 import { useForkConvoMutation } from '~/data-provider';
+import { RemiBorderGlow } from '~/components/BorderGlow';
 import { cn } from '~/utils';
 import store from '~/store';
 
@@ -356,7 +357,7 @@ export default function Fork({
       <Ariakit.Popover
         store={popoverStore}
         gutter={10}
-        className={`glass-popover remi-radius-card popover-animate ${isActive ? 'open' : ''} flex w-60 flex-col gap-3 overflow-hidden border border-border-medium p-2 px-4 shadow-lg`}
+        className={`popover-animate ${isActive ? 'open' : ''} border-0 bg-transparent p-0 shadow-none`}
         style={{
           outline: 'none',
           pointerEvents: 'auto',
@@ -366,6 +367,11 @@ export default function Fork({
         unmountOnHide={true}
         onClose={() => setIsActive(false)}
       >
+        <RemiBorderGlow
+          variant="popover"
+          className="remi-radius-card w-60"
+          innerClassName="flex flex-col gap-3 overflow-hidden p-2 px-4"
+        >
         <div className="flex h-8 w-full items-center justify-center text-sm text-text-primary">
           {localize(activeSetting)}
           <Ariakit.HovercardProvider placement="right-start">
@@ -440,6 +446,7 @@ export default function Fork({
           infoKey="com_ui_fork_info_remember"
           showToastOnCheck
         />
+        </RemiBorderGlow>
       </Ariakit.Popover>
     </>
   );

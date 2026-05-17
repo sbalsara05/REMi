@@ -20,6 +20,8 @@ import MarkdownErrorBoundary from './MarkdownErrorBoundary';
 import { langSubset, preprocessLaTeX } from '~/utils';
 import { unicodeCitation } from '~/components/Web';
 import { code, a, p, img } from './MarkdownComponents';
+import RemiStreamCaret from '~/components/Remi/RemiStreamCaret';
+import '~/components/Remi/remiStreamCaret.css';
 import store from '~/store';
 
 type TContentProps = {
@@ -64,11 +66,12 @@ const Markdown = memo(function Markdown({ content = '', isLatestMessage }: TCont
   ];
 
   if (isInitializing) {
+    if (!isLatestMessage) {
+      return null;
+    }
     return (
-      <div className="absolute">
-        <p className="relative">
-          <span className={isLatestMessage ? 'result-thinking' : ''} />
-        </p>
+      <div className="submitting remi-stream-caret-slot">
+        <RemiStreamCaret />
       </div>
     );
   }

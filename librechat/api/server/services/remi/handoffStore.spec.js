@@ -142,4 +142,27 @@ describe('handoffStore', () => {
       conversationId: 'convo-abc',
     });
   });
+
+  it('resolves Docker volume screenshot paths to the host Application Support dir', () => {
+    const id = 'docker-path-shot';
+    const created = handoffStore.upsertInteraction({
+      id,
+      screenshot: ONE_BY_ONE_PNG_BASE64,
+    });
+    const hostFile = created.screenshotPath;
+
+    const Database = require('better-sqlite3');
+    const db = new Database(handoffStore.getDbPath());
+    db.prepare(`UPDATE interactions SET screenshot_path = ? WHERE id = ?`).run(
+      `/remi-handoff/screenshots/${id}.png`,
+      id,
+    );
+    db.close();
+    handoffStore.closeDb();
+    handoffStore = require('./handoffStore');
+
+    const row = handoffStore.getInteraction(id);
+    expect(row.hasScreenshot).toBe(true);
+    expect(row.screenshotPath).toBe(hostFile);
+  });
 });

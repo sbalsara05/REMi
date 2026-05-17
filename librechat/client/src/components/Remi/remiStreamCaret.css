@@ -1,0 +1,10 @@
+.remi-stream-caret {
+  margin-left: 0.15rem;
+  vertical-align: middle;
+}
+
+.submitting .remi-stream-caret-slot {
+  display: inline-flex;
+  min-height: 1.25rem;
+  align-items: flex-end;
+}

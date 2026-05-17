@@ -47,6 +47,10 @@ run_app() {
 trap cleanup EXIT INT TERM
 
 cd "$ROOT_DIR"
+if [[ -x "$ROOT_DIR/scripts/sync-mouse-spritesheet.sh" ]]; then
+  "$ROOT_DIR/scripts/sync-mouse-spritesheet.sh"
+fi
+
 echo "Building $APP_NAME..."
 build
 echo "Launching $APP_NAME..."
@@ -57,9 +61,9 @@ if ! command -v fswatch >/dev/null 2>&1; then
   wait
 fi
 
-echo "Watching UI/MagicPointer.swift and UI/main.swift"
+echo "Watching UI/*.swift and UI/Resources/*"
 
-fswatch -o "UI/MagicPointer.swift" "UI/main.swift" | while read -r _; do
+fswatch -o "UI/MagicPointer.swift" "UI/RemiSpriteView.swift" "UI/main.swift" "UI/Resources" | while read -r _; do
   echo "Change detected. Rebuilding..."
   if build; then
     echo "Build succeeded. Relaunching..."

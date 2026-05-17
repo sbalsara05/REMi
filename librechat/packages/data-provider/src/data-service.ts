@@ -1288,6 +1288,7 @@ export type TRemiInteraction = {
   prompt?: string | null;
   responseSoFar?: string | null;
   screenshotPath?: string | null;
+  hasScreenshot?: boolean;
   model?: string | null;
   cropHash?: string | null;
   syncedToChat: boolean;
@@ -1307,6 +1308,15 @@ export function listRemiInteractions(
 
 export function getRemiInteraction(id: string): Promise<TRemiInteraction> {
   return request.get(endpoints.remiInteraction(id));
+}
+
+export function getRemiInteractionScreenshot(id: string): Promise<AxiosResponse<Blob>> {
+  return request.getResponse(endpoints.remiInteractionScreenshot(id), {
+    responseType: 'blob',
+    headers: {
+      Accept: 'image/png, image/*',
+    },
+  });
 }
 
 export function postRemiContext(body: {

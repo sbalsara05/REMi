@@ -50,6 +50,7 @@ const AuthContextProvider = ({
   const [token, setToken] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isAuthReady, setIsAuthReady] = useState<boolean>(false);
   const setQueriesEnabled = useSetRecoilState<boolean>(store.queriesEnabled);
 
   const userRoleName = user?.role ?? '';
@@ -180,6 +181,11 @@ const AuthContextProvider = ({
       return;
     }
     refreshToken.mutate(undefined, {
+      onSettled: () => {
+        if (!isExternalRedirectRef.current) {
+          setIsAuthReady(true);
+        }
+      },
       onSuccess: (data: t.TRefreshTokenResponse | undefined) => {
         if (isExternalRedirectRef.current) {
           return;
@@ -236,8 +242,11 @@ const AuthContextProvider = ({
     }
     if (token == null || !token || !isAuthenticated) {
       silentRefresh();
+    } else {
+      setIsAuthReady(true);
     }
   }, [
+
     token,
     isAuthenticated,
     userQuery.data,
@@ -267,6 +276,12 @@ const AuthContextProvider = ({
     };
   }, [setUserContext, user]);
 
+  useEffect(() => {
+    if (authConfig?.test === true) {
+      setIsAuthReady(true);
+    }
+  }, [authConfig?.test]);
+
   const memoedValue = useMemo(
     () => ({
       user,
@@ -275,6 +290,7 @@ const AuthContextProvider = ({
       login,
       logout,
       setError,
+      isAuthReady,
       roles: {
         [SystemRoles.USER]: userRole,
         [SystemRoles.ADMIN]: adminRole,
@@ -288,6 +304,7 @@ const AuthContextProvider = ({
       error,
       isAuthenticated,
       token,
+      isAuthReady,
       userRole,
       adminRole,
       isCustomRole,

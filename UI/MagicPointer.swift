@@ -15,7 +15,6 @@
 import Cocoa
 import CoreGraphics
 import ApplicationServices
-import ScreenCaptureKit
 import Security
 
 // ─────────────────────────────────────────────
@@ -28,8 +27,14 @@ enum Config {
     static let wiggleWindowSeconds        = 1.2
     static let wiggleMinDistance: CGFloat = 28
     static let wiggleCooldownSeconds      = 1.0
-    static let overlayWidth: CGFloat      = 540
-    static let overlayHeight: CGFloat     = 124
+    static let overlayWidth: CGFloat      = 420
+    static let overlayMinWidth: CGFloat   = 300
+    static let overlayMaxWidth: CGFloat   = 560
+    static var overlayMinHeight: CGFloat  { OverlayLayout.minimumPanelHeight }
+    static let overlayMaxHeight: CGFloat  = 520
+    static let overlayCollapsedHeight: CGFloat = 48
+    static var overlayHeight: CGFloat     { overlayMinHeight }
+    static let overlayStreamLineHeight: CGFloat = 18
     static let overlayCornerRadius: CGFloat = 18
     static let cursorCaptureSize: CGFloat = 360
     static let selectModeKeyCode: UInt16  = 49   // Space
@@ -95,6 +100,64 @@ enum LLM: String, CaseIterable {
         case .chatgpt: return "◉"
         case .gemini:  return "✦"
         }
+    }
+
+    var logoResourceName: String {
+        switch self {
+        case .claude:  return "llm-claude"
+        case .chatgpt: return "llm-chatgpt"
+        case .gemini:  return "llm-gemini"
+        }
+    }
+
+    var monochromeLogo: NSImage? {
+        guard let url = Bundle.main.url(forResource: logoResourceName, withExtension: "png"),
+              let img = NSImage(contentsOf: url)?.copy() as? NSImage else { return nil }
+        img.size = NSSize(width: 16, height: 16)
+        img.isTemplate = true
+        return img
+    }
+}
+
+private enum OverlayLayout {
+    static let margin: CGFloat = 14
+    static let topInset: CGFloat = 8
+    static let headerH: CGFloat = 20
+    static let pickerH: CGFloat = 28
+    static let rowGap: CGFloat = 6
+    static let inputH: CGFloat = 32
+    /// Raises sprite to align with NSTextField cap height (sheet art sits low in its frame).
+    static let inputSpriteRaise: CGFloat = 9
+    static let separatorH: CGFloat = 1
+    static let contextRowH: CGFloat = 32
+    static let minimumResponseHeight: CGFloat = 40
+    static let bottomPad: CGFloat = 8
+    static let containerInset: CGFloat = 12
+
+    static var chromeAboveContext: CGFloat {
+        topInset + headerH + rowGap + pickerH + rowGap + inputH + rowGap + separatorH + rowGap
+    }
+
+    static var minimumInnerHeight: CGFloat {
+        max(
+            chromeAboveContext + contextRowH + bottomPad,
+            chromeAboveContext + minimumResponseHeight + bottomPad
+        )
+    }
+
+    static var minimumPanelHeight: CGFloat {
+        minimumInnerHeight + containerInset
+    }
+
+    static func llmPickerWidth(segmentCount: Int) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font]
+        var total: CGFloat = 8
+        for llm in LLM.allCases.prefix(segmentCount) {
+            let textW = (llm.displayName as NSString).size(withAttributes: attrs).width
+            total += ceil(textW) + 20
+        }
+        return total
     }
 }
 
@@ -394,40 +457,23 @@ final class ContextCapturer {
         return String(text.prefix(maxChars)) + "…"
     }
 
-    func captureRegion(_ rect: CGRect, completion: @escaping (Data?) -> Void) {
-        if #unavailable(macOS 14.0) {
-            completion(nil)
-            return
+    private func captureRegion(_ rect: CGRect) -> Data? {
+        guard let image = CGWindowListCreateImage(
+            rect,
+            .optionOnScreenOnly,
+            kCGNullWindowID,
+            .bestResolution
+        ) else {
+            return nil
         }
+        return NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+    }
 
-        Task {
-            do {
-                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                guard let display = content.displays.first(where: { $0.frame.contains(CGPoint(x: rect.midX, y: rect.midY)) })
-                        ?? content.displays.first else {
-                    await MainActor.run { completion(nil) }
-                    return
-                }
-
-                let displayRelativeRect = CGRect(
-                    x: rect.origin.x - display.frame.origin.x,
-                    y: rect.origin.y - display.frame.origin.y,
-                    width: rect.width,
-                    height: rect.height
-                ).integral
-
-                let config = SCStreamConfiguration()
-                config.sourceRect = displayRelativeRect
-                config.width = Int(displayRelativeRect.width)
-                config.height = Int(displayRelativeRect.height)
-                config.showsCursor = false
-
-                let filter = SCContentFilter(display: display, excludingWindows: [])
-                let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-                let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
-                await MainActor.run { completion(data) }
-            } catch {
-                await MainActor.run { completion(nil) }
+    private func captureRegion(_ rect: CGRect, completion: @escaping (Data?) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let data = self?.captureRegion(rect)
+            DispatchQueue.main.async {
+                completion(data)
             }
         }
     }
@@ -700,6 +746,80 @@ enum KeychainHelper {
 }
 
 // ─────────────────────────────────────────────
+// MARK: — REMi SSE stream handler
+// ─────────────────────────────────────────────
+
+private final class RemiSSEStreamHandler: NSObject, URLSessionDataDelegate {
+    private var lineBuffer = ""
+    private var finished = false
+    private var onToken: ((String) -> Void)?
+    private var onComplete: ((Error?) -> Void)?
+
+    func configure(onToken: @escaping (String) -> Void, onComplete: @escaping (Error?) -> Void) {
+        lineBuffer = ""
+        finished = false
+        self.onToken = onToken
+        self.onComplete = onComplete
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        guard let chunk = String(data: data, encoding: .utf8) else { return }
+        lineBuffer += chunk
+        drainLines()
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error, (error as NSError).domain == NSURLErrorDomain,
+           (error as NSError).code == NSURLErrorCancelled {
+            return
+        }
+        drainLines()
+        if let http = task.response as? HTTPURLResponse, http.statusCode == 401 {
+            RemiAuth.clearSession()
+            finish(NSError(domain: "RemiClient", code: 401, userInfo: [
+                NSLocalizedDescriptionKey: "Session expired — sign in again",
+            ]))
+            return
+        }
+        finish(error)
+    }
+
+    private func drainLines() {
+        while let newline = lineBuffer.firstIndex(of: "\n") {
+            let line = String(lineBuffer[..<newline])
+            lineBuffer = String(lineBuffer[lineBuffer.index(after: newline)...])
+            handleSSELine(line)
+        }
+    }
+
+    private func handleSSELine(_ line: String) {
+        guard line.hasPrefix("data: ") else { return }
+        let payload = String(line.dropFirst(6))
+        if payload == "[DONE]" {
+            finish(nil)
+            return
+        }
+        if payload.hasPrefix("[ERROR]") {
+            finish(NSError(domain: "RemiClient", code: 502, userInfo: [
+                NSLocalizedDescriptionKey: String(payload.dropFirst(8)),
+            ]))
+            return
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.onToken?(payload)
+        }
+    }
+
+    private func finish(_ error: Error?) {
+        guard !finished else { return }
+        finished = true
+        DispatchQueue.main.async { [weak self] in
+            self?.onComplete?(error)
+        }
+    }
+}
+
+// ─────────────────────────────────────────────
 // MARK: — REMi Client
 // ─────────────────────────────────────────────
 
@@ -711,6 +831,17 @@ final class RemiClient {
         let selectionRect: SelectionRect?
         let hoveredText, appName, screenshotBase64: String?
         struct SelectionRect: Encodable { let x, y, width, height: Double }
+    }
+
+    private let streamHandler = RemiSSEStreamHandler()
+    private lazy var streamSession: URLSession = {
+        URLSession(configuration: .default, delegate: streamHandler, delegateQueue: nil)
+    }()
+    private var activeStreamTask: URLSessionDataTask?
+
+    func cancelActiveStream() {
+        activeStreamTask?.cancel()
+        activeStreamTask = nil
     }
 
     func send(
@@ -737,8 +868,11 @@ final class RemiClient {
     ) {
         guard let url = URL(string: "\(Config.remiBaseURL)/query"),
               let token = RemiAuth.accessToken else {
-            onComplete(URLError(.userAuthenticationRequired)); return
+            DispatchQueue.main.async { onComplete(URLError(.userAuthenticationRequired)) }
+            return
         }
+
+        cancelActiveStream()
 
         var selRect: Payload.SelectionRect?
         if case .selection(let r) = context.source {
@@ -765,34 +899,13 @@ final class RemiClient {
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.httpBody = try? JSONEncoder().encode(body)
 
-        URLSession.shared.dataTask(with: req) { data, response, error in
-            if let e = error { DispatchQueue.main.async { onComplete(e) }; return }
-            if let http = response as? HTTPURLResponse, http.statusCode == 401 {
-                RemiAuth.clearSession()
-                DispatchQueue.main.async {
-                    onComplete(NSError(domain: "RemiClient", code: 401, userInfo: [
-                        NSLocalizedDescriptionKey: "Session expired — sign in again",
-                    ]))
-                }
-                return
-            }
-            guard let data, let text = String(data: data, encoding: .utf8) else {
-                DispatchQueue.main.async { onComplete(URLError(.cannotDecodeContentData)) }; return
-            }
-            var streamError: Error?
-            for line in text.components(separatedBy: "\n") where line.hasPrefix("data: ") {
-                let tok = String(line.dropFirst(6))
-                if tok == "[DONE]" { continue }
-                if tok.hasPrefix("[ERROR]") {
-                    streamError = NSError(domain: "RemiClient", code: 502, userInfo: [
-                        NSLocalizedDescriptionKey: String(tok.dropFirst(8)),
-                    ])
-                    continue
-                }
-                DispatchQueue.main.async { onToken(tok) }
-            }
-            DispatchQueue.main.async { onComplete(streamError) }
-        }.resume()
+        streamHandler.configure(onToken: onToken, onComplete: { [weak self] error in
+            self?.activeStreamTask = nil
+            onComplete(error)
+        })
+
+        activeStreamTask = streamSession.dataTask(with: req)
+        activeStreamTask?.resume()
     }
 }
 
@@ -801,61 +914,85 @@ final class RemiClient {
 // ─────────────────────────────────────────────
 
 final class GlowBorderView: NSView {
-    var llm: LLM = .claude { didSet { rebuild() } }
-    private var glowLayer: CALayer?
+    var llm: LLM = .claude { didSet { applyColors() } }
+    private let gradientLayer = CAGradientLayer()
+    private let maskLayer = CAShapeLayer()
+    private var isStreaming = false
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        commonInit()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        commonInit()
+    }
+
+    private func commonInit() {
         wantsLayer = true
-        layer?.cornerRadius = 14
         layer?.masksToBounds = false
-        rebuild()
+        gradientLayer.type = .conic
+        gradientLayer.startPoint = CGPoint(x: 0.5, y: 0.5)
+        gradientLayer.endPoint = CGPoint(x: 0.5, y: 0)
+        gradientLayer.locations = [0, 0.25, 0.5, 0.75, 1]
+        maskLayer.fillRule = .evenOdd
+        gradientLayer.mask = maskLayer
+        layer?.addSublayer(gradientLayer)
+        applyColors()
+    }
+
+    func setStreaming(_ active: Bool) {
+        guard isStreaming != active else { return }
+        isStreaming = active
+        if active {
+            startRotation()
+        } else {
+            stopRotation()
+        }
+        applyColors()
     }
 
     override func layout() {
         super.layout()
-        layer?.cornerRadius = 14
-        rebuild()
+        let radius: CGFloat = 14
+        layer?.cornerRadius = radius
+        gradientLayer.frame = bounds
+        gradientLayer.cornerRadius = radius
+
+        let ringWidth: CGFloat = isStreaming ? 3.5 : 2.5
+        let outer = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let inner = outer.insetBy(dx: ringWidth, dy: ringWidth)
+        let path = CGMutablePath()
+        path.addPath(CGPath(roundedRect: outer, cornerWidth: radius, cornerHeight: radius, transform: nil))
+        path.addPath(CGPath(
+            roundedRect: inner,
+            cornerWidth: max(radius - ringWidth, 2),
+            cornerHeight: max(radius - ringWidth, 2),
+            transform: nil
+        ))
+        maskLayer.path = path
+        maskLayer.frame = bounds
     }
 
-    private func rebuild() {
-        guard bounds.width > 0, bounds.height > 0 else { return }
-        glowLayer?.removeFromSuperlayer()
+    private func applyColors() {
+        let colors = llm.shimmerColors
+        gradientLayer.colors = (colors + [colors[0]]).map { $0.withAlphaComponent(isStreaming ? 0.95 : 0.55).cgColor }
+        gradientLayer.opacity = isStreaming ? 1 : 0.75
+    }
 
-        let gl = CALayer()
-        gl.frame = bounds
-        gl.cornerRadius = 14
-        gl.backgroundColor = NSColor.clear.cgColor
-        gl.borderWidth = 3.8
-        gl.borderColor = llm.glowColor.withAlphaComponent(1.0).cgColor
-        gl.shadowColor = llm.glowColor.cgColor
-        gl.shadowRadius = 26
-        gl.shadowOpacity = 0.95
-        gl.shadowOffset = .zero
-        gl.shadowPath = CGPath(
-            roundedRect: gl.bounds,
-            cornerWidth: gl.cornerRadius,
-            cornerHeight: gl.cornerRadius,
-            transform: nil
-        )
-        layer?.insertSublayer(gl, at: 0)
-        glowLayer = gl
+    private func startRotation() {
+        guard gradientLayer.animation(forKey: "streamRotate") == nil else { return }
+        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+        spin.fromValue = 0
+        spin.toValue = Double.pi * 2
+        spin.duration = 2.4
+        spin.repeatCount = .infinity
+        gradientLayer.add(spin, forKey: "streamRotate")
+    }
 
-        let pulseOpacity = CABasicAnimation(keyPath: "shadowOpacity")
-        pulseOpacity.fromValue = 0.7
-        pulseOpacity.toValue = 1.0
-        pulseOpacity.duration = 0.95
-        pulseOpacity.autoreverses = true
-        pulseOpacity.repeatCount = .infinity
-        gl.add(pulseOpacity, forKey: "pulseOpacity")
-
-        let pulseWidth = CABasicAnimation(keyPath: "borderWidth")
-        pulseWidth.fromValue = 3.4
-        pulseWidth.toValue = 5.8
-        pulseWidth.duration = 0.95
-        pulseWidth.autoreverses = true
-        pulseWidth.repeatCount = .infinity
-        gl.add(pulseWidth, forKey: "pulseWidth")
+    private func stopRotation() {
+        gradientLayer.removeAnimation(forKey: "streamRotate")
     }
 }
 
@@ -1043,178 +1180,501 @@ final class DraggableVisualEffectView: NSVisualEffectView {
     override var mouseDownCanMoveWindow: Bool { true }
 }
 
+/// Bottom-right grip — resizes the panel; layout follows via `NSWindowDelegate`.
+final class OverlayResizeHandle: NSView {
+    weak var targetWindow: NSWindow?
+    var onResizeEnded: (() -> Void)?
+
+    private var initialFrame: NSRect = .zero
+    private var initialMouse = NSPoint.zero
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: NSCursor.crosshair)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let window = targetWindow else { return }
+        initialFrame = window.frame
+        initialMouse = NSEvent.mouseLocation
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let window = targetWindow else { return }
+        let mouse = NSEvent.mouseLocation
+        let dx = mouse.x - initialMouse.x
+        let dy = mouse.y - initialMouse.y
+
+        var frame = initialFrame
+        frame.size.width = min(
+            Config.overlayMaxWidth,
+            max(Config.overlayMinWidth, initialFrame.width + dx)
+        )
+        let newHeight = min(
+            Config.overlayMaxHeight,
+            max(Config.overlayMinHeight, initialFrame.height + dy)
+        )
+        frame.origin.y = initialFrame.origin.y
+        frame.size.height = newHeight
+        window.setFrame(frame, display: true)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        onResizeEnded?()
+    }
+}
+
 // ─────────────────────────────────────────────
 // MARK: — Overlay View Controller
 // ─────────────────────────────────────────────
 
 final class OverlayViewController: NSViewController {
-    private let glowView      = GlowBorderView()
-    private let container     = DraggableVisualEffectView()
-    private let llmPicker     = NSSegmentedControl()
-    private let textField     = NSTextField()
-    private let responseLabel = NSTextField()
-    private let modeLabel     = NSTextField()
-    private let hotkeyHint    = NSTextField()
+    private let glowView = GlowBorderView()
+    private let container = DraggableVisualEffectView()
+    private let llmPicker = NSSegmentedControl()
+    private let remiSprite = RemiSpriteView()
+    private let textField = NSTextField()
+    private let contextLabel = NSTextField()
+    private let responseScrollView = NSScrollView()
+    private let responseTextView = NSTextView()
+    private let modeLabel = NSTextField()
+    private let hotkeyHint = NSTextField()
+    private let minimizeButton = NSButton()
+    private let resizeHandle = OverlayResizeHandle()
+    private let separator = NSBox()
+
+    private var isStreamingResponse = false
+    private var streamedCharCount = 0
+    private(set) var isCollapsed = false
+    private(set) var userManualLayout = false
+    private var expandedSize: NSSize?
 
     var currentLLM: LLM = .claude
     var onSubmit: ((String) -> Void)?
     var onLLMChange: ((LLM) -> Void)?
+    var onHeightChange: ((CGFloat) -> Void)?
+    var onWidthChange: ((CGFloat) -> Void)?
 
     override func loadView() {
         view = NSView(frame: NSRect(x: 0, y: 0,
                                     width: Config.overlayWidth,
-                                    height: Config.overlayHeight))
+                                    height: Config.overlayMinHeight))
     }
 
-    override func viewDidLoad() { super.viewDidLoad(); buildUI() }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        buildUI()
+        applyLayout(collapsed: false)
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        applyLayout(collapsed: isCollapsed)
+    }
 
     private func buildUI() {
-        let inner = NSRect(x: 6, y: 6,
-                           width: Config.overlayWidth - 12,
-                           height: Config.overlayHeight - 12)
-
-        glowView.frame = inner.insetBy(dx: -2, dy: -2)
         glowView.wantsLayer = true
-        glowView.layer?.cornerRadius = 14
         glowView.layer?.masksToBounds = false
         view.addSubview(glowView)
 
-        container.frame = inner
         container.wantsLayer = true
         container.layer?.cornerRadius = 14
         container.layer?.masksToBounds = true
         container.blendingMode = .behindWindow
         container.material = .underWindowBackground
         container.state = .active
-        container.layer?.backgroundColor = NSColor(calibratedRed: 0.33, green: 0.56, blue: 0.92, alpha: 0.16).cgColor
         container.layer?.borderWidth = 1
-        container.layer?.borderColor = NSColor.white.withAlphaComponent(0.30).cgColor
+        container.layer?.borderColor = NSColor.white.withAlphaComponent(0.22).cgColor
         view.addSubview(container)
 
-        modeLabel.frame = NSRect(x: 20, y: inner.height - 26, width: 300, height: 16)
-        modeLabel.isEditable = false; modeLabel.isBordered = false
+        modeLabel.isEditable = false
+        modeLabel.isBordered = false
         modeLabel.backgroundColor = .clear
         modeLabel.textColor = .white.withAlphaComponent(0.88)
         modeLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        modeLabel.stringValue = "MagicPointer  ·  cursor context"
+        modeLabel.stringValue = "MagicPointer · cursor"
         container.addSubview(modeLabel)
 
-        hotkeyHint.frame = NSRect(x: inner.width - 190, y: inner.height - 26, width: 170, height: 16)
         hotkeyHint.isEditable = false
         hotkeyHint.isBordered = false
         hotkeyHint.backgroundColor = .clear
         hotkeyHint.textColor = .white.withAlphaComponent(0.75)
         hotkeyHint.font = NSFont.systemFont(ofSize: 10)
         hotkeyHint.alignment = .right
-        hotkeyHint.stringValue = "⌘⇧Space: select"
+        hotkeyHint.stringValue = "Esc · Context 0"
         container.addSubview(hotkeyHint)
 
-        llmPicker.frame = NSRect(x: 18, y: inner.height - 52, width: Config.overlayWidth - 36, height: 22)
+        minimizeButton.bezelStyle = .inline
+        minimizeButton.isBordered = false
+        minimizeButton.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        minimizeButton.contentTintColor = .white.withAlphaComponent(0.85)
+        minimizeButton.target = self
+        minimizeButton.action = #selector(toggleCollapsed)
+        minimizeButton.toolTip = "Minimize panel"
+        container.addSubview(minimizeButton)
+
+        resizeHandle.targetWindow = view.window
+        resizeHandle.onResizeEnded = { [weak self] in
+            self?.noteUserResize()
+        }
+        container.addSubview(resizeHandle)
+
         llmPicker.segmentCount = LLM.allCases.count
+        llmPicker.segmentStyle = .rounded
+        llmPicker.segmentDistribution = .fill
+        llmPicker.trackingMode = .selectOne
         for (i, llm) in LLM.allCases.enumerated() {
-            llmPicker.setLabel("\(llm.icon) \(llm.displayName)", forSegment: i)
+            llmPicker.setImage(nil, forSegment: i)
+            llmPicker.setLabel(llm.displayName, forSegment: i)
         }
         llmPicker.selectedSegment = 0
-        llmPicker.trackingMode = .selectOne
-        llmPicker.target = self; llmPicker.action = #selector(pickerChanged)
+        llmPicker.target = self
+        llmPicker.action = #selector(pickerChanged)
         container.addSubview(llmPicker)
 
-        textField.frame = NSRect(x: 18, y: inner.height - 82, width: Config.overlayWidth - 36, height: 24)
+        remiSprite.startIdle()
+        container.addSubview(remiSprite)
+
         textField.placeholderString = "Ask about what's under your cursor…"
-        textField.isBordered = false; textField.backgroundColor = .clear
-        textField.textColor = .white; textField.font = NSFont.systemFont(ofSize: 14, weight: .medium)
-        textField.focusRingType = .none; textField.delegate = self
+        textField.isBordered = false
+        textField.backgroundColor = .clear
+        textField.textColor = .white
+        textField.font = NSFont.systemFont(ofSize: 14, weight: .medium)
+        textField.focusRingType = .none
+        textField.delegate = self
         container.addSubview(textField)
 
-        let sep2 = NSBox(); sep2.boxType = .separator
-        sep2.frame = NSRect(x: 18, y: inner.height - 86, width: Config.overlayWidth - 36, height: 1)
-        container.addSubview(sep2)
+        separator.boxType = .separator
+        container.addSubview(separator)
 
-        responseLabel.frame = NSRect(x: 18, y: 10, width: Config.overlayWidth - 36, height: 22)
-        responseLabel.isEditable = false; responseLabel.isBordered = false
-        responseLabel.backgroundColor = .clear; responseLabel.textColor = .white.withAlphaComponent(0.78)
-        responseLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        responseLabel.lineBreakMode = .byWordWrapping
-        responseLabel.cell?.wraps = true; responseLabel.cell?.isScrollable = false
-        responseLabel.stringValue = "Ask anything about what you are looking at"
-        container.addSubview(responseLabel)
+        contextLabel.isEditable = false
+        contextLabel.isBordered = false
+        contextLabel.isBezeled = false
+        contextLabel.drawsBackground = false
+        contextLabel.textColor = .white.withAlphaComponent(0.78)
+        contextLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        contextLabel.lineBreakMode = .byTruncatingTail
+        contextLabel.cell?.truncatesLastVisibleLine = true
+        contextLabel.stringValue = "Shift+Click to add context, or press ⌘C to add copied text."
+        container.addSubview(contextLabel)
+
+        responseScrollView.hasVerticalScroller = true
+        responseScrollView.drawsBackground = false
+        responseScrollView.borderType = .noBorder
+        responseScrollView.autohidesScrollers = true
+        container.addSubview(responseScrollView)
+
+        responseTextView.isEditable = false
+        responseTextView.isSelectable = true
+        responseTextView.drawsBackground = false
+        responseTextView.textColor = .white.withAlphaComponent(0.88)
+        responseTextView.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        responseTextView.textContainerInset = NSSize(width: 4, height: 6)
+        responseTextView.textContainer?.widthTracksTextView = true
+        responseTextView.string = ""
+        responseScrollView.documentView = responseTextView
+        responseScrollView.isHidden = true
+    }
+
+    private var showsResponseArea: Bool {
+        isStreamingResponse || !responseTextView.string.isEmpty
+    }
+
+    private func relayoutChrome(panelSize: NSSize, innerHeight: CGFloat, collapsed: Bool) {
+        let innerW = panelSize.width - OverlayLayout.containerInset
+        let controlsRight = innerW - 10
+        let headerY = innerHeight - OverlayLayout.topInset - OverlayLayout.headerH
+
+        minimizeButton.frame = NSRect(x: controlsRight - 52, y: headerY + 2, width: 22, height: 20)
+        hotkeyHint.frame = NSRect(x: controlsRight - 196, y: headerY + 4, width: 136, height: 16)
+        modeLabel.frame = NSRect(
+            x: OverlayLayout.margin, y: headerY + 4,
+            width: max(120, innerW - 220), height: 16
+        )
+        resizeHandle.frame = NSRect(x: innerW - 22, y: 4, width: 18, height: 18)
+
+        let showBody = !collapsed
+        llmPicker.isHidden = !showBody
+        textField.isHidden = !showBody
+        separator.isHidden = !showBody
+        contextLabel.isHidden = !showBody || showsResponseArea
+        remiSprite.isHidden = !showBody || showsResponseArea
+        responseScrollView.isHidden = !showBody || !showsResponseArea
+        resizeHandle.isHidden = collapsed
+
+        guard showBody else { return }
+
+        if innerHeight < OverlayLayout.minimumInnerHeight, !userManualLayout {
+            onHeightChange?(OverlayLayout.minimumPanelHeight)
+            return
+        }
+
+        var y = headerY - OverlayLayout.rowGap
+
+        let pickerW = innerW - OverlayLayout.margin * 2
+        y -= OverlayLayout.pickerH
+        llmPicker.frame = NSRect(
+            x: OverlayLayout.margin, y: y, width: pickerW, height: OverlayLayout.pickerH
+        )
+        y -= OverlayLayout.rowGap
+
+        y -= OverlayLayout.inputH
+        let inputY = y
+        let spriteColumnW = remiSprite.columnWidth
+        let spriteH = remiSprite.intrinsicContentSize.height
+        let showSpriteInInput = !showsResponseArea
+        if showSpriteInInput {
+            remiSprite.frame = NSRect(
+                x: 10,
+                y: inputY + max(0, (OverlayLayout.inputH - spriteH) / 2 + OverlayLayout.inputSpriteRaise),
+                width: spriteColumnW,
+                height: spriteH
+            )
+        }
+        let inputX = showSpriteInInput ? 10 + spriteColumnW + 6 : OverlayLayout.margin
+        textField.frame = NSRect(
+            x: inputX, y: inputY,
+            width: max(80, innerW - inputX - OverlayLayout.margin),
+            height: OverlayLayout.inputH
+        )
+        y -= OverlayLayout.rowGap
+
+        y -= OverlayLayout.separatorH
+        separator.frame = NSRect(
+            x: OverlayLayout.margin, y: y,
+            width: innerW - OverlayLayout.margin * 2, height: OverlayLayout.separatorH
+        )
+        y -= OverlayLayout.rowGap
+
+        let responseY = OverlayLayout.bottomPad
+
+        if showsResponseArea {
+            let available = max(0, y - responseY)
+            let responseH = max(OverlayLayout.minimumResponseHeight, available)
+            responseScrollView.frame = NSRect(
+                x: OverlayLayout.margin,
+                y: responseY,
+                width: innerW - OverlayLayout.margin * 2,
+                height: responseH
+            )
+            if available < OverlayLayout.minimumResponseHeight, !userManualLayout {
+                onHeightChange?(OverlayLayout.minimumPanelHeight)
+            }
+        } else {
+            let contextY = y - OverlayLayout.contextRowH
+            contextLabel.frame = NSRect(
+                x: OverlayLayout.margin,
+                y: contextY + 8,
+                width: max(60, innerW - OverlayLayout.margin * 2),
+                height: 16
+            )
+        }
+    }
+
+    func applyLayout(collapsed: Bool) {
+        if let parent = view.superview {
+            view.frame = parent.bounds
+        }
+        let panelSize = view.bounds.size
+        let width = min(Config.overlayMaxWidth, max(Config.overlayMinWidth, panelSize.width))
+        let height: CGFloat
+        if collapsed {
+            height = Config.overlayCollapsedHeight
+        } else {
+            height = min(Config.overlayMaxHeight, max(Config.overlayMinHeight, panelSize.height))
+        }
+
+        let innerH = height - OverlayLayout.containerInset
+        let inner = NSRect(
+            x: OverlayLayout.containerInset / 2, y: OverlayLayout.containerInset / 2,
+            width: width - OverlayLayout.containerInset, height: innerH
+        )
+        glowView.frame = inner.insetBy(dx: -2, dy: -2)
+        container.frame = inner
+        relayoutChrome(panelSize: NSSize(width: width, height: height), innerHeight: innerH, collapsed: collapsed)
+
+        let fillAlpha = 0.08 + min(0.14, CGFloat(streamedCharCount) / 500)
+        container.layer?.backgroundColor = NSColor.white.withAlphaComponent(fillAlpha).cgColor
+
+        resizeHandle.targetWindow = view.window
+    }
+
+    func syncLayoutToWindow(userInitiated: Bool) {
+        if userInitiated {
+            userManualLayout = true
+        }
+        applyLayout(collapsed: isCollapsed)
+    }
+
+    func noteUserResize() {
+        userManualLayout = true
+        if !isCollapsed {
+            expandedSize = view.bounds.size
+        }
+        syncLayoutToWindow(userInitiated: true)
+    }
+
+    @objc private func toggleCollapsed() {
+        if isCollapsed {
+            expand()
+        } else {
+            collapse()
+        }
+    }
+
+    func collapse() {
+        guard !isCollapsed else { return }
+        expandedSize = view.bounds.size
+        isCollapsed = true
+        minimizeButton.title = "+"
+        minimizeButton.toolTip = "Restore panel"
+        onHeightChange?(Config.overlayCollapsedHeight)
+        applyLayout(collapsed: true)
+    }
+
+    func expand() {
+        guard isCollapsed else { return }
+        isCollapsed = false
+        minimizeButton.title = "−"
+        minimizeButton.toolTip = "Minimize panel"
+        let target = expandedSize ?? NSSize(width: Config.overlayWidth, height: Config.overlayMinHeight)
+        onHeightChange?(target.height)
+        onWidthChange?(target.width)
+        applyLayout(collapsed: false)
+    }
+
+    private func setOverlayHeight(_ height: CGFloat) {
+        guard !userManualLayout, !isCollapsed else { return }
+        let clamped = min(Config.overlayMaxHeight, max(Config.overlayMinHeight, height))
+        onHeightChange?(clamped)
+    }
+
+    private func updateOverlayHeightForContent() {
+        guard !userManualLayout, !isCollapsed else {
+            responseTextView.scrollToEndOfDocument(nil)
+            return
+        }
+        let width = responseScrollView.contentSize.width - 8
+        guard width > 0,
+              let layout = responseTextView.layoutManager,
+              let container = responseTextView.textContainer else {
+            setOverlayHeight(Config.overlayMinHeight)
+            return
+        }
+        layout.ensureLayout(for: container)
+        let used = layout.usedRect(for: container).height
+        let responseBlock = min(152, max(OverlayLayout.minimumResponseHeight, used + 18))
+        setOverlayHeight(OverlayLayout.minimumPanelHeight + max(0, responseBlock - OverlayLayout.minimumResponseHeight))
+    }
+
+    private func setChromeDimmed(_ dimmed: Bool) {
+        let alpha: CGFloat = dimmed ? 0.45 : 1
+        llmPicker.alphaValue = alpha
+        textField.alphaValue = alpha
+        contextLabel.alphaValue = alpha
+        modeLabel.alphaValue = dimmed ? 0.7 : 0.88
     }
 
     @objc private func pickerChanged() {
-        let llm = LLM.allCases[llmPicker.selectedSegment]
-        updateLLM(llm); onLLMChange?(llm)
+        let idx = max(0, llmPicker.selectedSegment)
+        let llm = LLM.allCases[idx]
+        updateLLM(llm)
+        onLLMChange?(llm)
     }
 
     func updateLLM(_ llm: LLM) {
-        currentLLM = llm; glowView.llm = llm
-        llmPicker.selectedSegment = LLM.allCases.firstIndex(of: llm) ?? 0
+        currentLLM = llm
+        glowView.llm = llm
+        if let idx = LLM.allCases.firstIndex(of: llm) {
+            llmPicker.selectedSegment = idx
+        }
     }
 
     func reset(context: CursorContext, llm: LLM) {
-        textField.stringValue = ""; responseLabel.stringValue = ""
+        isStreamingResponse = false
+        streamedCharCount = 0
+        userManualLayout = false
+        isCollapsed = false
+        expandedSize = nil
+        minimizeButton.title = "−"
+        glowView.setStreaming(false)
+        remiSprite.setStreaming(false)
+        remiSprite.startIdle()
+        setChromeDimmed(false)
+        textField.stringValue = ""
+        responseTextView.string = ""
+        contextLabel.stringValue = "Shift+Click to add context, or press ⌘C to add copied text."
+        contextLabel.textColor = .white.withAlphaComponent(0.78)
+        onHeightChange?(OverlayLayout.minimumPanelHeight)
+        onWidthChange?(Config.overlayWidth)
+        applyLayout(collapsed: false)
         updateLLM(llm)
-        let pageSummary = extractedPageSummary(from: context.hoveredText)
 
         switch context.source {
         case .cursor:
-            modeLabel.stringValue = pageSummary == nil ? "MagicPointer  ·  cursor context"
-                                                       : "MagicPointer  ·  web context"
-            if let pageSummary, !pageSummary.isEmpty {
-                let summary = "\(String(pageSummary.prefix(80)))\(pageSummary.count > 80 ? "…" : "")"
-                textField.placeholderString = "About page: \(summary)"
-            } else if let t = context.hoveredText, !t.isEmpty {
-                let summary = "\(String(t.prefix(80)))\(t.count > 80 ? "…" : "")"
-                textField.placeholderString = "About: \(summary)"
+            modeLabel.stringValue = "MagicPointer · cursor"
+            if let app = context.appName, !app.isEmpty {
+                textField.placeholderString = "Ask about \(app)…"
             } else {
-                textField.placeholderString = context.appName.map { "Ask about \($0)…" }
-                    ?? "Ask about what's under your cursor…"
+                textField.placeholderString = "Ask about what's under your cursor…"
             }
         case .selection(let rect):
-            modeLabel.stringValue = pageSummary == nil
-                ? "selected region  \(Int(rect.width)) × \(Int(rect.height)) px"
-                : "selected region  \(Int(rect.width)) × \(Int(rect.height)) px  ·  web context"
-            if let pageSummary, !pageSummary.isEmpty {
-                let summary = "\(String(pageSummary.prefix(80)))\(pageSummary.count > 80 ? "…" : "")"
-                textField.placeholderString = "About selected page area: \(summary)"
-            } else if let t = context.hoveredText, !t.isEmpty {
-                let summary = "\(String(t.prefix(80)))\(t.count > 80 ? "…" : "")"
-                textField.placeholderString = "About selection: \(summary)"
-            } else {
-                textField.placeholderString = "Ask about the selected region…"
-            }
+            modeLabel.stringValue = "MagicPointer · \(Int(rect.width))×\(Int(rect.height))"
+            textField.placeholderString = "Ask about the selected region…"
         }
-    }
-
-    private func extractedPageSummary(from hoverText: String?) -> String? {
-        guard let hoverText, !hoverText.isEmpty else { return nil }
-        for line in hoverText.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.hasPrefix("Page: ") {
-                let val = String(trimmed.dropFirst("Page: ".count)).trimmingCharacters(in: .whitespaces)
-                return val.isEmpty ? nil : val
-            }
-        }
-        return nil
     }
 
     func focus() { view.window?.makeFirstResponder(textField) }
 
     func updatePersistentCaptureStatus(contextCount: Int, latest: String?) {
-        hotkeyHint.stringValue = "Esc: close  ·  Context \(contextCount)"
+        guard !isStreamingResponse else { return }
+        hotkeyHint.stringValue = "Esc · Context \(contextCount)"
         if let latest, !latest.isEmpty {
             let text = String(latest.prefix(72))
-            responseLabel.stringValue = "Captured #\(contextCount): \(text)\(latest.count > 72 ? "…" : "")"
-            responseLabel.textColor = .white.withAlphaComponent(0.86)
+            contextLabel.stringValue = "Captured #\(contextCount): \(text)\(latest.count > 72 ? "…" : "")"
+            contextLabel.textColor = .white.withAlphaComponent(0.86)
         } else {
-            responseLabel.stringValue = "Shift+Click to add context, or press ⌘C to add copied text."
-            responseLabel.textColor = .white.withAlphaComponent(0.78)
+            contextLabel.stringValue = "Shift+Click to add context, or press ⌘C to add copied text."
+            contextLabel.textColor = .white.withAlphaComponent(0.78)
         }
+        applyLayout(collapsed: isCollapsed)
     }
 
-    func showLoading()              { responseLabel.stringValue = "…"; responseLabel.textColor = .tertiaryLabelColor }
-    func appendToken(_ t: String)   { responseLabel.stringValue += t; responseLabel.textColor = .labelColor }
+    func showLoading() {
+        isStreamingResponse = true
+        streamedCharCount = 0
+        glowView.setStreaming(true)
+        remiSprite.setStreaming(true)
+        setChromeDimmed(true)
+        responseTextView.string = ""
+        responseTextView.textColor = .white.withAlphaComponent(0.9)
+        applyLayout(collapsed: isCollapsed)
+    }
+
+    func appendToken(_ token: String) {
+        if responseTextView.string.isEmpty {
+            responseTextView.string = token
+            applyLayout(collapsed: isCollapsed)
+        } else {
+            responseTextView.string += token
+        }
+        streamedCharCount += token.count
+        responseTextView.textColor = .white.withAlphaComponent(0.92)
+        updateOverlayHeightForContent()
+        responseTextView.scrollToEndOfDocument(nil)
+    }
+
     func finishResponse(error: Error?) {
-        if let e = error { responseLabel.stringValue = "Error: \(e.localizedDescription)"; responseLabel.textColor = .systemRed }
+        isStreamingResponse = false
+        glowView.setStreaming(false)
+        remiSprite.setStreaming(false)
+        remiSprite.startIdle()
+        setChromeDimmed(false)
+        if let error {
+            responseTextView.string = "Error: \(error.localizedDescription)"
+            responseTextView.textColor = .systemRed
+        }
+        applyLayout(collapsed: isCollapsed)
+        updateOverlayHeightForContent()
     }
 }
 
@@ -1236,8 +1696,10 @@ extension OverlayViewController: NSTextFieldDelegate {
 // MARK: — Overlay Window Controller
 // ─────────────────────────────────────────────
 
-final class OverlayWindowController: NSWindowController {
+final class OverlayWindowController: NSWindowController, NSWindowDelegate {
     let vc = OverlayViewController()
+    private weak var remiClient: RemiClient?
+    private var isProgrammaticResize = false
     private var contextPickMonitor: Any?
     private var escKeyMonitor: Any?
     private var escGlobalMonitor: Any?
@@ -1250,7 +1712,7 @@ final class OverlayWindowController: NSWindowController {
 
     init() {
         let panel = OverlayPanel(
-            contentRect: NSRect(x: 0, y: 0, width: Config.overlayWidth, height: Config.overlayHeight),
+            contentRect: NSRect(x: 0, y: 0, width: Config.overlayWidth, height: Config.overlayMinHeight),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false
         )
@@ -1264,18 +1726,51 @@ final class OverlayWindowController: NSWindowController {
         panel.invalidateShadow()
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         super.init(window: panel)
+        panel.delegate = self
         panel.contentViewController = vc
+        vc.view.autoresizingMask = [.width, .height]
         vc.onLLMChange = { [weak self] llm in self?.onLLMChange?(llm) }
+        vc.onHeightChange = { [weak self] height in
+            self?.resizePanel(height: height, width: nil, animated: true)
+        }
+        vc.onWidthChange = { [weak self] width in
+            self?.resizePanel(height: nil, width: width, animated: true)
+        }
     }
     required init?(coder: NSCoder) { fatalError() }
 
+    func windowDidResize(_ notification: Notification) {
+        guard !isProgrammaticResize else { return }
+        vc.syncLayoutToWindow(userInitiated: true)
+    }
+
+    private func resizePanel(height: CGFloat?, width: CGFloat?, animated: Bool) {
+        guard let panel = window as? OverlayPanel else { return }
+        var frame = panel.frame
+        if let width {
+            frame.size.width = min(Config.overlayMaxWidth, max(Config.overlayMinWidth, width))
+        }
+        if let height {
+            let clamped = min(Config.overlayMaxHeight, max(Config.overlayMinHeight, height))
+            let delta = clamped - frame.size.height
+            frame.origin.y += delta
+            frame.size.height = clamped
+        }
+        isProgrammaticResize = true
+        panel.setFrame(frame, display: true, animate: animated)
+        isProgrammaticResize = false
+        vc.applyLayout(collapsed: vc.isCollapsed)
+    }
+
     func show(at screenPoint: CGPoint, context: CursorContext, llm: LLM, requireEscToDismiss: Bool = false) {
-        guard let screen = NSScreen.main else { return }
+        guard let screen = NSScreen.main, let panel = window else { return }
+        let panelH = panel.frame.height > 0 ? panel.frame.height : Config.overlayMinHeight
+        let panelW = panel.frame.width > 0 ? panel.frame.width : Config.overlayWidth
         let origin = NSPoint(
-            x: screenPoint.x - Config.overlayWidth / 2,
-            y: screen.frame.height - screenPoint.y - Config.overlayHeight / 2 - 70
+            x: screenPoint.x - panelW / 2,
+            y: screen.frame.height - screenPoint.y - panelH / 2 - 70
         )
-        window?.setFrameOrigin(origin)
+        panel.setFrameOrigin(origin)
         vc.reset(context: context, llm: llm)
         resetCapturedContext(with: context)
         NSApp.activate(ignoringOtherApps: true)
@@ -1372,6 +1867,8 @@ final class OverlayWindowController: NSWindowController {
         }
         lastClipboardString = nil
         capturedContextSnippets.removeAll()
+        remiClient?.cancelActiveStream()
+        remiClient = nil
         window?.orderOut(nil)
     }
 
@@ -1436,6 +1933,7 @@ final class OverlayWindowController: NSWindowController {
     }
 
     func submit(query: String, context: CursorContext, remi: RemiClient) {
+        remiClient = remi
         vc.showLoading()
         remi.send(
             query: query, llm: vc.currentLLM, context: context,
@@ -1535,19 +2033,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let requestID = self.wiggleRequestID
                 guard !self.selWindow.isVisible else { return }
 
-                let provisional = CursorContext(
-                    source: .cursor(position: pt),
-                    hoveredText: nil,
-                    appName: NSWorkspace.shared.frontmostApplication?.localizedName,
-                    screenshotData: nil
-                )
-                self.lastCtx = provisional
-                self.overlay.show(at: pt, context: provisional, llm: self.activeLLM)
-                self.overlay.addCapturedContext(provisional)
                 self.capturer.capture(at: pt) { ctx in
                     guard self.wiggleRequestID == requestID else { return }
                     self.lastCtx = ctx
-                    self.overlay.addCapturedContext(ctx)
+                    self.overlay.show(at: pt, context: ctx, llm: self.activeLLM)
                 }
             }
         }
@@ -1558,18 +2047,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             DispatchQueue.main.async {
                 let anchor = CGPoint(x: rect.midX, y: rect.maxY + 20)
-                let provisional = CursorContext(
-                    source: .selection(rect: rect),
-                    hoveredText: nil,
-                    appName: NSWorkspace.shared.frontmostApplication?.localizedName,
-                    screenshotData: nil
-                )
-                self.lastCtx = provisional
-                self.overlay.show(at: anchor, context: provisional, llm: self.activeLLM)
-                self.overlay.addCapturedContext(provisional)
                 self.capturer.capture(region: rect) { ctx in
                     self.lastCtx = ctx
-                    self.overlay.addCapturedContext(ctx)
+                    self.overlay.show(at: anchor, context: ctx, llm: self.activeLLM)
                 }
             }
         }

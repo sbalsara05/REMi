@@ -1,62 +1,72 @@
 import {
   SPRITE,
+  getClipDef,
+  getClipFrames,
+  getClipFrameRange,
   clipAnimationDuration,
+  clipAnimationDurationMs,
   clipAnimationPositions,
   clipBackgroundPosition,
   clipBackgroundSize,
   clipFrameSize,
-  getClipDef,
+  resolveSemanticClip,
 } from './mouseSpriteCatalog';
 
 describe('mouseSpriteCatalog', () => {
-  it('defines sheet geometry', () => {
-    expect(SPRITE.frameW).toBe(48);
-    expect(SPRITE.frameH).toBe(36);
-    expect(SPRITE.cols).toBe(4);
-    expect(SPRITE.rows).toBe(12);
+  it('defines Foozle sheet geometry', () => {
+    expect(SPRITE.frameW).toBe(64);
+    expect(SPRITE.frameH).toBe(48);
+    expect(SPRITE.cols).toBe(15);
+    expect(SPRITE.rows).toBe(13);
   });
 
-  it('computes scaled background size', () => {
-    expect(clipBackgroundSize(1)).toEqual({ w: 192, h: 432 });
-    expect(clipBackgroundSize(0.5)).toEqual({ w: 96, h: 216 });
+  it('computes scaled background size from sheet geometry', () => {
+    expect(clipBackgroundSize(1)).toEqual({
+      w: SPRITE.cols * SPRITE.frameW,
+      h: SPRITE.rows * SPRITE.frameH,
+    });
   });
 
-  it('computes viewport display size', () => {
-    expect(clipFrameSize('idleFront', 1)).toEqual({ w: 18, h: 10 });
-    expect(clipFrameSize('walkSide', 1)).toEqual({ w: 24, h: 20 });
-    expect(clipFrameSize('walkSide', 0.5)).toEqual({ w: 12, h: 10 });
+  it('computes viewport display size from per-frame catalog', () => {
+    const clip = 'idle';
+    expect(clipFrameSize(clip, 1)).toEqual({ w: 22, h: 32 });
   });
 
-  it('positions walkSide frame 2 with viewport offset', () => {
-    expect(clipBackgroundPosition('walkSide', 2, 1)).toBe('-104px -13px');
+  it('positions frames using per-frame viewport from catalog', () => {
+    const clip = 'run';
+    const { row } = getClipDef(clip);
+    const frameIndex = 2;
+    const fr = getClipFrames(clip)[frameIndex];
+    const x = -(fr.col * SPRITE.frameW + fr.viewport.ox);
+    const y = -(row * SPRITE.frameH + fr.viewport.oy);
+    expect(clipBackgroundPosition(clip, frameIndex, 1)).toBe(`${x}px ${y}px`);
   });
 
-  it('positions idleFront frame 1 at row 9', () => {
-    expect(clipBackgroundPosition('idleFront', 1, 1)).toBe('-63px -350px');
+  it('supports frameStart subsets for land clip', () => {
+    expect(getClipFrameRange('land')).toEqual({ start: 4, count: 1 });
+    expect(clipAnimationPositions('land', 1).from).toBe(clipAnimationPositions('land', 1).to);
   });
 
   it('derives animation duration from fps and frame count', () => {
-    expect(clipAnimationDuration('idleFront')).toBe('0.5s');
-    expect(clipAnimationDuration('walkSide')).toBe('0.5s');
+    const clip = 'idle';
+    const { count } = getClipFrameRange(clip);
+    const fps = getClipDef(clip).fps ?? 8;
+    expect(clipAnimationDuration(clip)).toBe(`${count / fps}s`);
+    expect(clipAnimationDurationMs(clip)).toBe((count / fps) * 1000);
   });
 
-  it('keyframes end at last frame (steps n-1)', () => {
-    expect(clipAnimationPositions('walkSide', 1)).toEqual({
-      from: '-8px -13px',
-      to: '-152px -13px',
-    });
-    expect(clipAnimationPositions('idleFront', 1)).toEqual({
-      from: '-15px -350px',
-      to: '-63px -350px',
-    });
+  it('resolves legacy aliases to semantic clips', () => {
+    expect(resolveSemanticClip('walkSide')).toBe('idle');
+    expect(resolveSemanticClip('attackSide')).toBe('slash');
+    expect(resolveSemanticClip('dashSide')).toBe('slide');
+  });
+
+  it('maps idle to dj_stand on the double-jump row', () => {
+    expect(getClipDef('idle').row).toBe(3);
+    expect(getClipFrameRange('idle')).toEqual({ start: 0, count: 1 });
   });
 
   it('uses BASE_URL for sprite asset path', () => {
     expect(SPRITE.url).toMatch(/assets\/mouse-spritesheet\.png$/);
-  });
-
-  it('maps clip rows', () => {
-    expect(getClipDef('dashSide').row).toBe(3);
-    expect(getClipDef('idleBack').frames).toBe(2);
   });
 });

@@ -27,10 +27,12 @@ router.get('/interactions', (req, res) => {
 router.get('/interactions/:id/screenshot', (req, res) => {
   try {
     const interaction = handoffStore.getInteraction(req.params.id);
-    if (!interaction?.screenshotPath || !fs.existsSync(interaction.screenshotPath)) {
+    const screenshotPath = handoffStore.resolveInteractionScreenshotPath(interaction);
+    if (!screenshotPath) {
       return res.status(404).json({ error: 'Screenshot not found' });
     }
-    res.sendFile(interaction.screenshotPath);
+    res.type('png');
+    res.sendFile(screenshotPath);
   } catch (error) {
     logger.error('[remi] screenshot failed', error);
     res.status(500).json({ error: 'Failed to load screenshot' });

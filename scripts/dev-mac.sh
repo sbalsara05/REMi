@@ -14,6 +14,10 @@ remi_sync_librechat_config
 remi_link_librechat_env
 remi_export_compose_env
 
+if [[ -x "$ROOT/scripts/sync-mouse-spritesheet.sh" ]]; then
+  "$ROOT/scripts/sync-mouse-spritesheet.sh"
+fi
+
 cd "$LC_DIR"
 
 COMPOSE_FILES=(-f docker-compose.yml -f "$REMI_ROOT/config/docker-compose.remi.yaml")

@@ -14,7 +14,12 @@ echo "==> REMi API tests (store, service, routes)"
   server/routes/__tests__/remi.spec.js)
 
 echo "==> REMi client tests"
-(cd client && npx jest --ci src/components/Remi/MouseHistoryPanel.spec.tsx)
+(cd client && npx jest --ci \
+  src/components/Remi/MouseHistoryPanel.spec.tsx \
+  src/components/Remi/RemiCompanion.spec.tsx \
+  src/components/Remi/mouseSpritePools.spec.ts \
+  src/components/Icons/mouseSpriteCatalog.spec.ts \
+  src/components/Icons/mouseVariant.spec.ts)
 
 echo "==> REMi data-provider endpoint tests"
 (cd packages/data-provider && npx jest --ci specs/remi-endpoints.spec.ts)

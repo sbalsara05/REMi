@@ -132,6 +132,16 @@ function UnifiedSidebar() {
     return () => document.removeEventListener('keydown', handler);
   }, [isSmallScreen, expanded, handleCollapse]);
 
+  /** Keep WebGL orb highlight centered on the main chat column, not the full shell. */
+  useEffect(() => {
+    const root = document.documentElement;
+    const width = isSmallScreen ? 0 : expanded ? sidebarWidth : COLLAPSED_WIDTH;
+    root.style.setProperty('--remi-sidebar-width', `${width}px`);
+    return () => {
+      root.style.removeProperty('--remi-sidebar-width');
+    };
+  }, [isSmallScreen, expanded, sidebarWidth]);
+
   if (isSmallScreen) {
     return (
       <>

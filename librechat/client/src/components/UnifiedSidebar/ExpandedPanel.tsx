@@ -1,6 +1,7 @@
 import { memo, useCallback, lazy, Suspense } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRecoilValue } from 'recoil';
+import { RemiBorderGlow } from '~/components/BorderGlow';
 import { ShellIcons } from '~/components/Icons';
 import { QueryKeys } from 'librechat-data-provider';
 import { Skeleton, Sidebar, Button, TooltipAnchor } from '@librechat/client';
@@ -139,7 +140,11 @@ function ExpandedPanel({
   const toggleClick = expanded ? onCollapse : onExpand;
 
   return (
-    <div className="glass-panel flex h-full flex-shrink-0 flex-col gap-2 border-r border-border-light/50 px-2 py-2">
+    <RemiBorderGlow
+      variant="card"
+      className="flex h-full flex-shrink-0 flex-col border-r border-border-light/50"
+      innerClassName="flex h-full flex-col gap-2 px-2 py-2"
+    >
       <TooltipAnchor
         side="right"
         description={localize(toggleLabel)}
@@ -179,7 +184,7 @@ function ExpandedPanel({
           <AccountSettings collapsed />
         </Suspense>
       </div>
-    </div>
+    </RemiBorderGlow>
   );
 }
 

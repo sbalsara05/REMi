@@ -147,6 +147,9 @@ export const remiInteractions = (cursor?: string | null, limit?: number) => {
 
 export const remiInteraction = (id: string) => `${remiRoot}/interactions/${id}`;
 
+export const remiInteractionScreenshot = (id: string) =>
+  `${remiRoot}/interactions/${id}/screenshot`;
+
 export const remiContext = () => `${remiRoot}/context`;
 
 export const remiHandoff = () => `${remiRoot}/handoff`;

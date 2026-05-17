@@ -1,16 +1,12 @@
 import { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { easings } from '@react-spring/web';
-import { EModelEndpoint } from 'librechat-data-provider';
 import { BirthdayIcon, TooltipAnchor, SplitText } from '@librechat/client';
 import { useChatContext, useAgentsMapContext, useAssistantsMapContext } from '~/Providers';
-import { useGetEndpointsQuery, useGetStartupConfig } from '~/data-provider';
-import ConvoIcon from '~/components/Endpoints/ConvoIcon';
+import { useGetStartupConfig } from '~/data-provider';
+import { RemiBorderGlow } from '~/components/BorderGlow';
 import RemiPlayfulMouse from '~/components/Remi/RemiPlayfulMouse';
 import { useLocalize, useAuthContext } from '~/hooks';
-import { getIconEndpoint, getEntity } from '~/utils';
-
-const containerClassName =
-  'shadow-stroke relative flex h-full items-center justify-center rounded-full bg-white dark:bg-presentation dark:text-white text-black dark:after:shadow-none ';
+import { getEntity } from '~/utils';
 
 function getTextSizeClass(text: string | undefined | null) {
   if (!text) {
@@ -28,12 +24,11 @@ function getTextSizeClass(text: string | undefined | null) {
   return 'text-lg sm:text-md';
 }
 
-export default function Landing({ centerFormOnLanding }: { centerFormOnLanding: boolean }) {
+export default function Landing() {
   const { conversation } = useChatContext();
   const agentsMap = useAgentsMapContext();
   const assistantMap = useAssistantsMapContext();
   const { data: startupConfig } = useGetStartupConfig();
-  const { data: endpointsConfig } = useGetEndpointsQuery();
   const { user } = useAuthContext();
   const localize = useLocalize();
 
@@ -42,20 +37,8 @@ export default function Landing({ centerFormOnLanding }: { centerFormOnLanding: 
   const [contentHeight, setContentHeight] = useState(0);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  const endpointType = useMemo(() => {
-    let ep = conversation?.endpoint ?? '';
-    if (ep === EModelEndpoint.azureOpenAI) {
-      ep = EModelEndpoint.openAI;
-    }
-    return getIconEndpoint({
-      endpointsConfig,
-      iconURL: conversation?.iconURL,
-      endpoint: ep,
-    });
-  }, [conversation?.endpoint, conversation?.iconURL, endpointsConfig]);
-
   const { entity, isAgent, isAssistant } = getEntity({
-    endpoint: endpointType,
+    endpoint: conversation?.endpoint,
     agentsMap,
     assistantMap,
     agent_id: conversation?.agent_id,
@@ -114,24 +97,14 @@ export default function Landing({ centerFormOnLanding }: { centerFormOnLanding: 
   }, [lineCount, description]);
 
   const getDynamicMargin = useMemo(() => {
-    let margin = 'mb-0';
-
-    if (lineCount > 2 || (description && description.length > 100)) {
-      margin = 'mb-10';
-    } else if (lineCount > 1 || (description && description.length > 0)) {
-      margin = 'mb-6';
-    } else if (textHasMultipleLines) {
-      margin = 'mb-4';
-    }
-
     if (contentHeight > 200) {
-      margin = 'mb-16';
-    } else if (contentHeight > 150) {
-      margin = 'mb-12';
+      return 'mb-2';
     }
-
-    return margin;
-  }, [lineCount, description, textHasMultipleLines, contentHeight]);
+    if (contentHeight > 150 || (description && description.length > 100)) {
+      return 'mb-1';
+    }
+    return '';
+  }, [contentHeight, description]);
 
   const greetingText =
     typeof startupConfig?.interface?.customWelcome === 'string'
@@ -140,35 +113,28 @@ export default function Landing({ centerFormOnLanding }: { centerFormOnLanding: 
 
   return (
     <div
-      className={`flex h-full transform-gpu flex-col items-center justify-center pb-16 transition-all duration-200 ${centerFormOnLanding ? 'max-h-full sm:max-h-0' : 'max-h-full'} ${getDynamicMargin}`}
+      className={`chat-landing-hero flex w-full transform-gpu flex-col items-center justify-center transition-all duration-200 ${getDynamicMargin}`}
     >
-      <div ref={contentRef} className="flex flex-col items-center gap-0 p-2">
-        <RemiPlayfulMouse profile="hero" className="mb-3" />
+      <RemiBorderGlow
+        variant="card"
+        className="remi-radius-card max-w-lg shrink-0"
+        innerClassName="flex flex-col items-center gap-0 p-4 sm:p-6"
+      >
+      <div ref={contentRef} className="flex flex-col items-center gap-0">
+        <div className="relative mb-3">
+          <RemiPlayfulMouse profile="hero" />
+          {startupConfig?.showBirthdayIcon && (
+            <TooltipAnchor
+              className="absolute bottom-0 right-0"
+              description={localize('com_ui_happy_birthday')}
+              aria-label={localize('com_ui_happy_birthday')}
+            >
+              <BirthdayIcon />
+            </TooltipAnchor>
+          )}
+        </div>
         <div className="mouse-stripe-divider mb-4 w-32 max-w-full shrink-0" aria-hidden />
-        <div
-          className={`flex ${textHasMultipleLines ? 'flex-col' : 'flex-col md:flex-row'} items-center justify-center gap-2`}
-        >
-          <div className={`relative size-10 justify-center ${textHasMultipleLines ? 'mb-2' : ''}`}>
-            <ConvoIcon
-              agentsMap={agentsMap}
-              assistantMap={assistantMap}
-              conversation={conversation}
-              endpointsConfig={endpointsConfig}
-              containerClassName={containerClassName}
-              context="landing"
-              className="h-2/3 w-2/3 text-black dark:text-white"
-              size={41}
-            />
-            {startupConfig?.showBirthdayIcon && (
-              <TooltipAnchor
-                className="absolute bottom-[27px] right-2"
-                description={localize('com_ui_happy_birthday')}
-                aria-label={localize('com_ui_happy_birthday')}
-              >
-                <BirthdayIcon />
-              </TooltipAnchor>
-            )}
-          </div>
+        <div className="flex flex-col items-center justify-center">
           {((isAgent || isAssistant) && name) || name ? (
             <div className="flex flex-col items-center gap-0 p-2">
               <SplitText
@@ -207,6 +173,7 @@ export default function Landing({ centerFormOnLanding }: { centerFormOnLanding: 
           </div>
         )}
       </div>
+      </RemiBorderGlow>
     </div>
   );
 }

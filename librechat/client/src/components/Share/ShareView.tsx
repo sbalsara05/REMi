@@ -152,7 +152,7 @@ function SharedView() {
   return (
     <ShareContext.Provider value={{ isSharedConvo: true }}>
       <div className="relative flex h-screen w-full overflow-hidden bg-[#0a0a0f] dark:bg-surface-secondary">
-        <RemiAmbient />
+        <RemiAmbient backdrop />
         <main className="relative z-[1] flex w-full grow overflow-hidden dark:bg-surface-secondary">
           {artifactsContainer}
         </main>

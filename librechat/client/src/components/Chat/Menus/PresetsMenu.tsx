@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { useRecoilValue } from 'recoil';
 import { Trans } from 'react-i18next';
+import { RemiBorderGlow } from '~/components/BorderGlow';
 import { ShellIcons } from '~/components/Icons';
 import { Content, Portal, Root, Trigger } from '@radix-ui/react-popover';
 import {
@@ -81,17 +82,23 @@ const PresetsMenu: FC = () => {
           <Content
             side="bottom"
             align="center"
-            className="glass-popover mt-2 max-h-[495px] overflow-x-hidden rounded-lg border border-border-light text-text-primary shadow-lg md:min-w-[400px]"
+            className="mt-2 border-0 bg-transparent p-0 shadow-none md:min-w-[400px]"
           >
-            <PresetItems
-              presets={presetsQuery.data}
-              onSetDefaultPreset={onSetDefaultPreset}
-              onSelectPreset={onSelectPreset}
-              onChangePreset={onChangePreset}
-              onDeletePreset={onDeletePreset}
-              clearAllPresets={clearAllPresets}
-              onFileSelected={onFileSelected}
-            />
+            <RemiBorderGlow
+              variant="popover"
+              className="remi-radius-card max-h-[495px] md:min-w-[400px]"
+              innerClassName="overflow-x-hidden overflow-y-auto text-text-primary"
+            >
+              <PresetItems
+                presets={presetsQuery.data}
+                onSetDefaultPreset={onSetDefaultPreset}
+                onSelectPreset={onSelectPreset}
+                onChangePreset={onChangePreset}
+                onDeletePreset={onDeletePreset}
+                clearAllPresets={clearAllPresets}
+                onFileSelected={onFileSelected}
+              />
+            </RemiBorderGlow>
           </Content>
         </div>
       </Portal>

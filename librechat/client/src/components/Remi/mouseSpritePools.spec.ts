@@ -1,10 +1,12 @@
+import { resolveSemanticClip } from '~/components/Icons/mouseSpriteCatalog';
 import {
   ACTION_CLIPS,
+  CLICK_SURPRISE_WEIGHTS,
   EXCITED_CLIPS,
   IDLE_CLIPS,
-  PLAYFUL_CLIPS,
   attackClipForCorner,
   pickRandomClip,
+  pickWeightedClip,
   pickRandomCorner,
   randomIntBetween,
   streamingClip,
@@ -19,36 +21,41 @@ describe('mouseSpritePools', () => {
   });
 
   it('pickRandomClip can exclude the current clip', () => {
-    const pool = ['idleFront', 'idleSide', 'idleBack'] as const;
+    const pool = ['idle', 'run'] as const;
     for (let i = 0; i < 30; i++) {
-      const next = pickRandomClip(pool, 'idleFront');
-      expect(next).not.toBe('idleFront');
+      const next = pickRandomClip(pool, 'idle');
+      expect(next).not.toBe('idle');
     }
   });
 
-  it('defines non-empty pools', () => {
-    expect(IDLE_CLIPS.length).toBeGreaterThan(0);
-    expect(ACTION_CLIPS.length).toBeGreaterThan(0);
-    expect(EXCITED_CLIPS.length).toBeGreaterThan(0);
+  it('pickWeightedClip returns a weighted clip', () => {
+    for (let i = 0; i < 20; i++) {
+      const clip = pickWeightedClip(CLICK_SURPRISE_WEIGHTS);
+      expect(['slash', 'thrust']).toContain(clip);
+    }
+  });
+
+  it('defines semantic pools', () => {
+    expect(IDLE_CLIPS).toEqual(['idle']);
+    expect(ACTION_CLIPS).toContain('lookUp');
+    expect(ACTION_CLIPS).not.toContain('run');
+    expect(EXCITED_CLIPS).toContain('slash');
   });
 
   it('pickRandomCorner excludes current corner when possible', () => {
     const corners = ['br', 'bl', 'tl', 'tr'] as const;
     for (let i = 0; i < 20; i++) {
-      expect(corners).toContain(pickRandomCorner(corners, 'br'));
       expect(pickRandomCorner(corners, 'br')).not.toBe('br');
     }
   });
 
-  it('playful pool includes all sheet clips', () => {
-    expect(PLAYFUL_CLIPS.length).toBe(12);
-  });
-
-  it('maps corners to directional walk and attack clips', () => {
-    expect(walkClipForCorner('br')).toBe('walkFront');
-    expect(walkClipForCorner('tl')).toBe('walkBack');
-    expect(attackClipForCorner('br')).toBe('attackSide');
-    expect(streamingClip()).toBe('powerFront');
+  it('maps corners to idle and attack clips', () => {
+    expect(walkClipForCorner('br')).toBe('idle');
+    expect(resolveSemanticClip('walkSide')).toBe('idle');
+    expect(attackClipForCorner('br')).toBe('slash');
+    expect(attackClipForCorner('bl')).toBe('thrust');
+    expect(attackClipForCorner('tl')).toBe('combo');
+    expect(streamingClip()).toBe('lookUp');
   });
 
   it('randomIntBetween stays in range', () => {

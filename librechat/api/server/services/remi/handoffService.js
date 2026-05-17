@@ -26,12 +26,15 @@ async function attachScreenshotToContent({ req, screenshotPath, content }) {
     });
     req.file = prevFile;
 
-    if (file?.filepath) {
+    if (file?.filepath && file?.file_id) {
       content.push({
-        type: ContentTypes.IMAGE_URL,
-        image_url: {
-          url: file.filepath,
-          detail: 'auto',
+        type: ContentTypes.IMAGE_FILE,
+        [ContentTypes.IMAGE_FILE]: {
+          file_id: file.file_id,
+          filename: file.filename,
+          filepath: file.filepath,
+          width: file.width,
+          height: file.height,
         },
       });
     }

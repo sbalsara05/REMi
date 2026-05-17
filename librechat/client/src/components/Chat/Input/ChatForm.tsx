@@ -39,6 +39,7 @@ import EditBadges from './EditBadges';
 import BadgeRow from './BadgeRow';
 import Mention from './Mention';
 import store from '~/store';
+import { RemiBorderGlow } from '~/components/BorderGlow';
 
 interface ChatFormProps {
   index: number;
@@ -241,7 +242,7 @@ const ChatForm = memo(function ChatForm({
           (conversationId == null || conversationId === Constants.NEW_CONVO) &&
           !isSubmitting &&
           conversation?.messages?.length === 0
-          ? 'transition-all duration-200 sm:mb-28'
+          ? 'transition-all duration-200 sm:mb-6'
           : 'sm:mb-10',
       )}
     >
@@ -269,14 +270,18 @@ const ChatForm = memo(function ChatForm({
             conversationId={conversationId}
             agentId={conversation?.agent_id}
           />
-          <div
+          <RemiBorderGlow
+            variant="composer"
+            active={isSubmitting}
             onClick={handleContainerClick}
             className={cn(
-              'relative flex w-full flex-grow flex-col overflow-hidden rounded-t-3xl border pb-4 text-text-primary transition-all duration-200 sm:rounded-3xl sm:pb-0',
+              'relative flex w-full flex-grow flex-col overflow-hidden rounded-t-3xl pb-4 text-text-primary transition-all duration-200 sm:rounded-3xl sm:pb-0',
               isTextAreaFocused ? 'shadow-lg' : 'shadow-md',
-              isTemporary
-                ? 'border-violet-800/60 bg-violet-950/10'
-                : 'glass-composer border-border-light',
+              isTemporary && 'border-violet-800/60',
+            )}
+            innerClassName={cn(
+              'flex w-full flex-grow flex-col',
+              isTemporary ? 'bg-violet-950/10' : undefined,
             )}
           >
             <TextareaHeader addedConvo={addedConvo} setAddedConvo={setAddedConvo} />
@@ -400,7 +405,7 @@ const ChatForm = memo(function ChatForm({
               </div>
             </div>
             {TextToSpeech && automaticPlayback && <StreamAudio index={index} />}
-          </div>
+          </RemiBorderGlow>
         </div>
       </div>
     </form>
